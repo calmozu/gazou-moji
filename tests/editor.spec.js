@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test';
 import fs from 'node:fs/promises';
 
 async function ready(page){await page.goto('/');await expect(page.locator('html')).toHaveAttribute('data-ready','true');}
-async function project(page){const event=page.waitForEvent('download');await page.locator('#save-project').click();const file=await event;return JSON.parse(await fs.readFile(await file.path(),'utf8'));}
+async function project(page){const event=page.waitForEvent('download');await page.locator('#save-project').click();const file=await event;expect(file.suggestedFilename()).toMatch(/_\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}\.kasane$/);return JSON.parse(await fs.readFile(await file.path(),'utf8'));}
 async function background(page){
   const data=await page.evaluate(()=>{const c=document.createElement('canvas');c.width=400;c.height=200;const ctx=c.getContext('2d');ctx.fillStyle='#e6bc7b';ctx.fillRect(0,0,200,200);ctx.fillStyle='#315e48';ctx.fillRect(200,0,200,200);return c.toDataURL().split(',')[1];});
   await page.locator('#image-file').setInputFiles({name:'background.png',mimeType:'image/png',buffer:Buffer.from(data,'base64')});
@@ -40,13 +40,14 @@ test('background fitting, opacity, drag and auto-save survive reload',async({pag
 });
 
 test('glow is rasterized in preview, 300 dpi PNG and A4 PDF',async({page},info)=>{
-  await ready(page);await page.locator('#text').fill('光を重ねる。\nKasane');await page.locator('#glow').check();
+  await page.clock.setFixedTime(new Date('2026-10-20T05:30:45Z'));
+  await ready(page);await page.locator('#title').fill('春:手紙/案');await page.locator('#title').press('Tab');await page.locator('#text').fill('光を重ねる。\nKasane');await page.locator('#glow').check();
   await page.locator('#glow-color').evaluate(el=>{el.value='#ff0000';el.dispatchEvent(new Event('change',{bubbles:true}));});
   const redPixels=()=>page.locator('#canvas').evaluate(c=>{const d=c.getContext('2d').getImageData(0,0,c.width,c.height).data;let n=0;for(let i=0;i<d.length;i+=4)if(d[i]>d[i+1]+25&&d[i]>d[i+2]+25)n++;return n;});
   await expect.poll(redPixels).toBeGreaterThan(100);
   await page.locator('#export-button').click();await expect(page.locator('#export-dialog')).toBeVisible();
-  let event=page.waitForEvent('download');await page.locator('#confirm-export').click();let download=await event;await download.saveAs(info.outputPath('glow.png'));
-  await page.locator('#export-format').selectOption('pdf');event=page.waitForEvent('download');await page.locator('#confirm-export').click();download=await event;await download.saveAs(info.outputPath('glow.pdf'));
+  let event=page.waitForEvent('download');await page.locator('#confirm-export').click();let download=await event;expect(download.suggestedFilename()).toBe('春_手紙_案_2026-10-20_14-30-45.png');await download.saveAs(info.outputPath('glow.png'));
+  await page.locator('#export-format').selectOption('pdf');event=page.waitForEvent('download');await page.locator('#confirm-export').click();download=await event;expect(download.suggestedFilename()).toBe('春_手紙_案_2026-10-20_14-30-45.pdf');await download.saveAs(info.outputPath('glow.pdf'));
   const bytes=await fs.readFile(info.outputPath('glow.png'));expect(bytes.readUInt32BE(16)).toBe(2480);expect(bytes.readUInt32BE(20)).toBe(3508);
   const phys=bytes.indexOf(Buffer.from('pHYs'));expect(phys).toBeGreaterThan(0);expect(bytes.readUInt32BE(phys+4)).toBe(11811);expect(bytes.readUInt32BE(phys+8)).toBe(11811);
   const pdf=(await fs.readFile(info.outputPath('glow.pdf'))).toString('latin1');expect(pdf).toMatch(/^%PDF-/);expect(pdf).toContain('/Subtype /Image');const box=pdf.match(/\/MediaBox \[0 0 ([\d.]+) ([\d.]+)\]/);expect(Number(box[1])).toBeCloseTo(595.28,2);expect(Number(box[2])).toBeCloseTo(841.89,2);

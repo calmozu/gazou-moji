@@ -247,7 +247,13 @@ document.addEventListener('keydown',e=>{
   if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==='s'){e.preventDefault();saveProject();}
 });
 function download(blob,name){const url=URL.createObjectURL(blob),link=document.createElement('a');link.href=url;link.download=name;document.body.append(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),60000);}
-function filename(){return state.title.replace(/[<>:"/\\|?*\u0000-\u001f]/g,'_').trim()||'かさね';}
+function filename(){
+  const title=state.title.replace(/[<>:"/\\|?*\u0000-\u001f]/g,'_').trim()||'かさね';
+  const now=new Date(),pad=value=>String(value).padStart(2,'0');
+  const date=`${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}`;
+  const time=`${pad(now.getHours())}-${pad(now.getMinutes())}-${pad(now.getSeconds())}`;
+  return `${title}_${date}_${time}`;
+}
 function saveProject(){download(new Blob([JSON.stringify(state)],{type:'application/json'}),filename()+'.kasane');toast('編集できる原稿ファイルを保存しました。');}
 $('save-project').onclick=saveProject;
 $('open-project').onclick=()=>$('project-file').click();
