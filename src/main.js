@@ -7,7 +7,7 @@ import '@fontsource/zen-maru-gothic/700.css';
 import '@fontsource/klee-one/400.css';
 import '@fontsource/klee-one/600.css';
 import './style.css';
-import { families, initialState, render, dimensions, validateProject } from './render.js';
+import { families, initialState, render, dimensions, textBounds, validateProject } from './render.js';
 import { saveDraft, loadDraft } from './storage.js';
 import { pngWithDpi } from './png.js';
 
@@ -34,6 +34,12 @@ document.querySelector('#app').innerHTML = `
    <label class="field"><span class="label">フォント</span><select id="family"><option value="sans">角ゴシック</option><option value="serif">明朝</option><option value="round">丸ゴシック</option><option value="textbook">教科書風</option></select></label>
    <label class="label" for="size">文字サイズ</label><div class="size-buttons"><button id="smaller">小さく −</button><button id="larger">大きく ＋</button></div>
    <div class="row"><div class="number-unit"><input id="size" type="number" min="6" max="200" step="1" aria-label="文字サイズ"><span>pt</span></div><button id="bold" aria-pressed="false"><b>B</b> 太字</button><input class="color-input" id="color" type="color" aria-label="文字の色"></div>
+  </div>
+  <div class="section"><h2>文字枠の位置と大きさ</h2>
+   <p class="hint" id="text-box-help">用紙上の緑の枠をドラッグして移動。四隅の丸をつかむと大きさを変えられます。</p>
+   <div class="margin-grid" style="margin-top:14px">
+    ${[['x','左から'],['y','上から'],['width','幅'],['height','高さ']].map(([key,label])=>`<label class="field"><span class="label">${label}</span><div class="number-unit"><input id="box-${key}" data-box="${key}" type="number" min="${key==='width'||key==='height'?20:0}" step="1"><span>mm</span></div></label>`).join('')}
+   </div><div class="row" style="margin-top:14px"><button id="compact-text-box">小さな枠にする</button><button id="center-text-box">用紙の中央へ</button></div>
   </div>
   <div class="section"><h2>文字の並べ方</h2>
    <div class="segmented" role="group" aria-label="文字揃え"><button data-align="left" class="active">左揃え</button><button data-align="center">中央</button><button data-align="right">右揃え</button></div>
@@ -72,20 +78,20 @@ document.querySelector('#app').innerHTML = `
   </div>
   <div class="section"><h2>文字範囲の余白 <span>mm / 20 mm = 2 cm</span></h2><div class="margin-grid">
    ${[['top','上'],['bottom','下'],['left','左'],['right','右']].map(([key,label])=>`<label class="field"><span class="label">${label}</span><div class="number-unit"><input id="margin-${key}" data-margin="${key}" type="number" min="0" max="70" value="20"><span>mm</span></div></label>`).join('')}
-   </div><label class="check" style="margin-top:12px"><input id="show-guides" type="checkbox" checked>余白ガイドを表示</label><p class="hint">ガイドは書き出されません。初期設定は上下左右とも2 cmです。</p>
+   </div><label class="check" style="margin-top:12px"><input id="show-guides" type="checkbox" checked>余白ガイドを表示</label><p class="hint">余白を変えると、文字枠をその内側いっぱいに戻します。枠とガイドは書き出されません。</p>
   </div>
   <div class="section"><h2>原稿を残す</h2><p class="hint">編集中の原稿は、このブラウザーに自動保存します。別の端末でも編集するには、上の「原稿を保存」でファイルを保存してください。</p><button id="new-document" style="margin-top:14px">新しい原稿</button></div>
  </div>
 </aside>
 <main class="stage" aria-label="A4プレビュー">
  <div class="stage-bar"><div><input id="title" class="document-name" maxlength="100" aria-label="原稿の名前"></div><div class="stage-meta"><span id="page-meta">A4 · 210 × 297 mm</span><div class="history"><button id="undo" aria-label="元に戻す" title="元に戻す">↶</button><button id="redo" aria-label="やり直す" title="やり直す">↷</button></div><button id="fullscreen" class="quiet" aria-label="画面いっぱいで編集" title="画面いっぱいで編集">⛶</button></div></div>
- <div class="canvas-scroll" id="canvas-scroll"><div class="paper-wrap" id="paper-wrap"><canvas id="canvas" aria-label="仕上がりのプレビュー"></canvas><div class="guides" id="guides"></div><div class="empty-note" id="empty-note"><b>余白から、はじめよう。</b><small>左の文字欄に、ことばを添えて。</small></div></div></div>
- <div class="stage-footer"><span id="save-status" role="status"><i class="dot"></i>このブラウザーに自動保存</span><span id="overflow" class="warning" role="status" hidden>文字が用紙からはみ出しています。サイズや余白を調整してください。</span><span id="char-count">0 文字</span></div>
+ <div class="canvas-scroll" id="canvas-scroll"><div class="paper-wrap" id="paper-wrap"><canvas id="canvas" aria-label="仕上がりのプレビュー"></canvas><div class="guides" id="guides"></div><div id="text-box" class="text-box" role="group" tabindex="0" aria-label="文字枠を移動" aria-describedby="text-box-help"><span class="text-box-caption" aria-hidden="true">文字枠 · ドラッグで移動</span>${[['nw','左上'],['ne','右上'],['sw','左下'],['se','右下']].map(([key,label])=>`<button type="button" class="box-handle ${key}" data-resize="${key}" aria-label="文字枠の${label}を調整" title="ドラッグで大きさを変更"></button>`).join('')}</div><div class="empty-note" id="empty-note"><b>余白から、はじめよう。</b><small>左の文字欄に、ことばを添えて。</small></div></div></div>
+ <div class="stage-footer"><span id="save-status" role="status"><i class="dot"></i>このブラウザーに自動保存</span><span id="overflow" class="warning" role="status" hidden>文字が枠に収まりません。枠を広げるか文字を小さくしてください。</span><span id="char-count">0 文字</span></div>
 </main>
 </div>
 <input id="image-file" type="file" accept="image/jpeg,image/png,image/webp" hidden>
 <input id="project-file" type="file" accept=".kasane,.json,application/json" hidden>
-<dialog id="export-dialog" aria-labelledby="export-heading"><div class="dialog-top"><h2 id="export-heading">仕上がりを確認</h2><button id="close-export" class="quiet" aria-label="閉じる">✕</button></div><p class="hint">A4・300 dpiで保存します。背景・文字・光彩を一枚に重ねます。</p><img id="export-preview" alt="書き出す画像のプレビュー"><p id="export-warning" class="warning" hidden>用紙に収まらない文字があります。編集画面で調整してください。</p><div class="export-options"><select id="export-format" aria-label="書き出す形式"><option value="png">PNG 画像</option><option value="pdf">PDF（A4）</option></select><button id="confirm-export" class="primary">保存する ↗</button></div><p class="hint">iPadでは保存後、共有ボタンから「画像を保存」や「ファイルに保存」を選べます。</p></dialog>
+<dialog id="export-dialog" aria-labelledby="export-heading"><div class="dialog-top"><h2 id="export-heading">仕上がりを確認</h2><button id="close-export" class="quiet" aria-label="閉じる">✕</button></div><p class="hint">A4・300 dpiで保存します。背景・文字・光彩を一枚に重ねます。</p><img id="export-preview" alt="書き出す画像のプレビュー"><p id="export-warning" class="warning" hidden>文字枠に収まらない文字があります。編集画面で調整してください。</p><div class="export-options"><select id="export-format" aria-label="書き出す形式"><option value="png">PNG 画像</option><option value="pdf">PDF（A4）</option></select><button id="confirm-export" class="primary">保存する ↗</button></div><p class="hint">iPadでは保存後、共有ボタンから「画像を保存」や「ファイルに保存」を選べます。</p></dialog>
 <dialog id="new-dialog" aria-labelledby="new-heading"><div class="dialog-top"><h2 id="new-heading">新しい原稿にしますか？</h2></div><p class="hint">現在の原稿は置き換わります。必要なら先に「原稿を保存」してください。</p><div class="export-options"><button id="cancel-new">戻る</button><button id="confirm-new" class="primary">新しくする</button></div></dialog>
 <div class="toast" id="toast" role="status" hidden></div>`;
 
@@ -107,6 +113,7 @@ function fitPaper() {
   const width=Math.max(50,Math.min(availableW,availableH*w/h,850));
   $('paper-wrap').style.width=`${width}px`; $('paper-wrap').style.height=`${width*h/w}px`;
   const m=state.margins; Object.assign($('guides').style,{top:`${m.top/h*100}%`,bottom:`${m.bottom/h*100}%`,left:`${m.left/w*100}%`,right:`${m.right/w*100}%`});
+  const b=textBounds(state); Object.assign($('text-box').style,{left:`${b.x/w*100}%`,top:`${b.y/h*100}%`,width:`${b.width/w*100}%`,height:`${b.height/h*100}%`});
 }
 async function ensureFonts() {
   const styles=[state.style,...state.styles.filter(Boolean)], unique=new Map();
@@ -141,6 +148,12 @@ function syncControls(){
   $('page-meta').textContent=`A4 · ${dimensions(state).join(' × ')} mm`;
   $('bg-thumb').hidden=!image; $('remove-image').hidden=!image; if(image) $('bg-thumb').src=image.src;
   $('paper-wrap').classList.toggle('adjust',tab==='background');
+  const box=textBounds(state), [pageWidth,pageHeight]=dimensions(state);
+  for(const [key,value] of Object.entries(box)) {
+    const el=$('box-'+key); el.value=Math.round(value*10)/10;
+    el.max=key==='x'?pageWidth-box.width:key==='y'?pageHeight-box.height:key==='width'?pageWidth-box.x:pageHeight-box.y;
+  }
+  $('text-box').hidden=tab!=='text'; fitPaper();
   selectionInfo(); updateHistory();
 }
 function applyStyle(patch) {
@@ -194,9 +207,15 @@ for(const id of ['line-height','opacity','zoom','image-x','image-y']) {
 }
 $('fit').onchange=e=>updateValue(()=>{Object.assign(state.background,{fit:e.target.value,x:0,y:0,zoom:1});});
 $('reset-image').onclick=()=>updateValue(()=>Object.assign(state.background,{x:0,y:0,zoom:1}));
-document.querySelectorAll('[data-margin]').forEach(el=>el.onchange=()=>updateValue(()=>state.margins[el.dataset.margin]=Math.max(0,Math.min(70,Number(el.value)||0))));
+document.querySelectorAll('[data-margin]').forEach(el=>el.onchange=()=>updateValue(()=>{state.margins[el.dataset.margin]=Math.max(0,Math.min(70,Number(el.value)||0));state.textBox=null;}));
 document.querySelectorAll('[data-align]').forEach(b=>b.onclick=()=>updateValue(()=>state.align=b.dataset.align));
-document.querySelectorAll('[data-orientation]').forEach(b=>b.onclick=()=>updateValue(()=>{state.orientation=b.dataset.orientation;}));
+document.querySelectorAll('[data-orientation]').forEach(b=>b.onclick=()=>updateValue(()=>{state.orientation=b.dataset.orientation;state.textBox=textBounds(state);}));
+document.querySelectorAll('[data-box]').forEach(el=>el.onchange=()=>{
+  const value=Number(el.value);if(el.value===''||!Number.isFinite(value)){syncControls();return;}
+  updateValue(()=>{const box=textBounds(state);box[el.dataset.box]=value;state.textBox=textBounds({...state,textBox:box});});
+});
+$('compact-text-box').onclick=()=>updateValue(()=>{const box=textBounds(state);state.textBox=textBounds({...state,textBox:{...box,width:140,height:100}});});
+$('center-text-box').onclick=()=>updateValue(()=>{const [w,h]=dimensions(state),box=textBounds(state);state.textBox={...box,x:(w-box.width)/2,y:(h-box.height)/2};});
 function setTab(name){tab=name;document.querySelectorAll('[data-tab]').forEach(b=>{const active=b.dataset.tab===name;b.setAttribute('aria-selected',active);b.tabIndex=active?0:-1;$('panel-'+b.dataset.tab).hidden=!active;});syncControls();}
 document.querySelectorAll('[data-tab]').forEach(b=>{b.onclick=()=>setTab(b.dataset.tab);b.onkeydown=e=>{if(['ArrowLeft','ArrowRight','Home','End'].includes(e.key)){e.preventDefault();const tabs=['text','background','page'];let i=tabs.indexOf(tab);i=e.key==='Home'?0:e.key==='End'?2:(i+(e.key==='ArrowLeft'?-1:1)+3)%3;setTab(tabs[i]);$('tab-'+tabs[i]).focus();}};});
 function readDataURL(file){return new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.onerror=()=>reject(new Error('ファイルを読み込めませんでした。'));reader.readAsDataURL(file);});}
@@ -260,6 +279,45 @@ $('confirm-export').onclick=async()=>{
   }catch(error){console.error(error);toast('書き出せませんでした。画像を小さくして、もう一度お試しください。');}
   finally{document.body.classList.remove('busy');$('confirm-export').disabled=false;}
 };
+// The overlay is editor-only; the shared canvas renderer uses the same millimetre bounds.
+const textBoxElement=$('text-box'); let boxGesture=null;
+textBoxElement.addEventListener('pointerdown',e=>{
+  if(tab!=='text'||boxGesture||e.button!==0)return;
+  e.preventDefault();const handle=e.target.closest('[data-resize]');
+  (handle||textBoxElement).focus({preventScroll:true});textBoxElement.setPointerCapture(e.pointerId);
+  boxGesture={id:e.pointerId,startX:e.clientX,startY:e.clientY,box:textBounds(state),corner:handle?.dataset.resize,mm:dimensions(state)[0]/canvas.getBoundingClientRect().width,moved:false};
+});
+textBoxElement.addEventListener('pointermove',e=>{
+  const g=boxGesture;if(!g||g.id!==e.pointerId)return;e.preventDefault();
+  const dx=(e.clientX-g.startX)*g.mm,dy=(e.clientY-g.startY)*g.mm;
+  if(!g.moved){if(Math.hypot(dx,dy)<.2)return;remember();g.moved=true;}
+  const [w,h]=dimensions(state),b=g.box,clamp=(v,min,max)=>Math.max(min,Math.min(max,v));
+  let left=b.x,top=b.y,right=b.x+b.width,bottom=b.y+b.height;
+  if(!g.corner){left=clamp(b.x+dx,0,w-b.width);top=clamp(b.y+dy,0,h-b.height);right=left+b.width;bottom=top+b.height;}
+  else{
+    if(g.corner.includes('w'))left=clamp(b.x+dx,0,right-20);
+    if(g.corner.includes('e'))right=clamp(b.x+b.width+dx,left+20,w);
+    if(g.corner.includes('n'))top=clamp(b.y+dy,0,bottom-20);
+    if(g.corner.includes('s'))bottom=clamp(b.y+b.height+dy,top+20,h);
+  }
+  state.textBox={x:left,y:top,width:right-left,height:bottom-top};changed();
+});
+for(const name of ['pointerup','pointercancel','lostpointercapture'])textBoxElement.addEventListener(name,e=>{if(boxGesture?.id===e.pointerId)boxGesture=null;});
+textBoxElement.addEventListener('keydown',e=>{
+  if(!['ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(e.key))return;
+  e.preventDefault();const delta=e.shiftKey?5:1,box=textBounds(state),corner=e.target.closest('[data-resize]')?.dataset.resize;
+  const dx=e.key==='ArrowLeft'?-delta:e.key==='ArrowRight'?delta:0,dy=e.key==='ArrowUp'?-delta:e.key==='ArrowDown'?delta:0;
+  updateValue(()=>{
+    if(!corner){box.x+=dx;box.y+=dy;}
+    else{
+      if(corner.includes('w')){const shift=Math.max(-box.x,Math.min(box.width-20,dx));box.x+=shift;box.width-=shift;}
+      else box.width+=dx;
+      if(corner.includes('n')){const shift=Math.max(-box.y,Math.min(box.height-20,dy));box.y+=shift;box.height-=shift;}
+      else box.height+=dy;
+    }
+    state.textBox=textBounds({...state,textBox:box});
+  });
+});
 // Gesture coordinates use physical page units, so sliders and touch gestures share the same state.
 const pointers=new Map();let gesture=null;
 function gestureState(){const p=[...pointers.values()],a=p[0],b=p[1];return {cx:b?(a.x+b.x)/2:a.x,cy:b?(a.y+b.y)/2:a.y,d:b?Math.hypot(a.x-b.x,a.y-b.y):0};}

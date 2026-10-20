@@ -87,3 +87,64 @@ test('shared renderer fits all background modes and paints glow for both writing
   });
   expect(result.rects.contain).toMatchObject({w:210,h:105});expect(result.rects.cover.h).toBe(297);expect(result.rects.width.w).toBe(210);expect(result.rects.height.h).toBe(297);expect(result.horizontal).toBeGreaterThan(100);expect(result.vertical).toBeGreaterThan(100);expect(result.plain).toBe(0);
 });
+
+async function changeBox(page,values){
+  for(const [key,value] of Object.entries(values)){await page.locator('#box-'+key).fill(String(value));await page.locator('#box-'+key).press('Tab');}
+}
+async function drag(page,selector,dx,dy){
+  const b=await page.locator(selector).boundingBox();const x=b.x+b.width/2,y=b.y+b.height/2;
+  await page.mouse.move(x,y);await page.mouse.down();await page.mouse.move(x+dx,y+dy,{steps:5});await page.mouse.up();
+}
+
+test('text frame moves and resizes without changing text; undo, redo and persistence preserve it',async({page},info)=>{
+  await ready(page);await page.locator('#text').fill('小さな枠で、自由に。');
+  let saved=await project(page);expect(saved.textBox).toEqual({x:35,y:40,width:140,height:100});
+  await drag(page,'#text-box',35,45);let moved=await project(page);
+  expect(moved.textBox.x).toBeGreaterThan(saved.textBox.x);expect(moved.textBox.y).toBeGreaterThan(saved.textBox.y);expect(moved.text).toBe(saved.text);
+  await drag(page,'[data-resize=se]',-45,-50);let resized=await project(page);
+  expect(resized.textBox.width).toBeLessThan(moved.textBox.width);expect(resized.textBox.height).toBeLessThan(moved.textBox.height);expect(resized.textBox.x).toBe(moved.textBox.x);
+  await page.locator('#undo').click();expect((await project(page)).textBox).toEqual(moved.textBox);
+  await page.locator('#redo').click();expect((await project(page)).textBox).toEqual(resized.textBox);
+  await expect(page.locator('#save-status')).toContainText('保存済み');await page.reload();await expect(page.locator('html')).toHaveAttribute('data-ready','true');
+  expect((await project(page)).textBox).toEqual(resized.textBox);
+  await page.screenshot({path:info.outputPath('movable-text-frame.png')});
+});
+
+test('frame keeps page bounds; keyboard, corner handles, orientation and touch work',async({browser})=>{
+  const context=await browser.newContext({viewport:{width:820,height:1180},hasTouch:true,isMobile:true,deviceScaleFactor:1});const page=await context.newPage();await ready(page);
+  await page.locator('#text').fill('触って移動');const frame=await page.locator('#text-box').boundingBox(),cdp=await context.newCDPSession(page),cx=frame.x+frame.width/2,cy=frame.y+frame.height/2;
+  await cdp.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x:cx,y:cy,id:0}]});await cdp.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{x:cx+30,y:cy+40,id:0}]});await cdp.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});
+  let s=await project(page);expect(s.textBox.x).toBeGreaterThan(35);expect(s.textBox.y).toBeGreaterThan(40);
+  await page.locator('#text-box').focus();await page.keyboard.press('ArrowRight');let keyboard=await project(page);expect(keyboard.textBox.x).toBeCloseTo(s.textBox.x+1,4);
+  await drag(page,'[data-resize=nw]',20,20);s=await project(page);expect(s.textBox.width).toBeLessThan(140);expect(s.textBox.height).toBeLessThan(100);
+  await drag(page,'#text-box',-1000,-1000);s=await project(page);expect(s.textBox.x).toBe(0);expect(s.textBox.y).toBe(0);
+  await page.locator('#tab-page').click();await page.locator('[data-orientation=landscape]').click();await page.locator('#tab-text').click();await changeBox(page,{width:270,height:160,x:27,y:50});
+  await page.locator('#tab-page').click();await page.locator('[data-orientation=portrait]').click();s=await project(page);expect(s.textBox.x+s.textBox.width).toBeLessThanOrEqual(210);expect(s.textBox.y+s.textBox.height).toBeLessThanOrEqual(297);
+  await context.close();
+});
+
+test('old projects keep original placement; box controls and project roundtrip work',async({page})=>{
+  await ready(page);let old=await project(page);delete old.textBox;old.text='以前の原稿';old.styles=[];old.margins={top:25,left:30,bottom:25,right:30};
+  await page.locator('#project-file').setInputFiles({name:'old.kasane',mimeType:'application/json',buffer:Buffer.from(JSON.stringify(old))});
+  await expect(page.locator('#box-x')).toHaveValue('30');await expect(page.locator('#box-y')).toHaveValue('25');await expect(page.locator('#box-width')).toHaveValue('150');await expect(page.locator('#box-height')).toHaveValue('247');
+  await page.locator('#compact-text-box').click();await expect(page.locator('#box-width')).toHaveValue('140');await expect(page.locator('#box-height')).toHaveValue('100');
+  await page.locator('#center-text-box').click();let s=await project(page);expect(s.textBox).toEqual({x:35,y:98.5,width:140,height:100});
+  await changeBox(page,{width:80,height:60,x:70,y:110});s=await project(page);
+  await page.locator('#project-file').setInputFiles({name:'new.kasane',mimeType:'application/json',buffer:Buffer.from(JSON.stringify(s))});expect((await project(page)).textBox).toEqual({x:70,y:110,width:80,height:60});
+  await page.locator('#tab-page').click();await page.locator('#margin-left').fill('25');await page.locator('#margin-left').press('Tab');await page.locator('#tab-text').click();await expect(page.locator('#box-x')).toHaveValue('25');
+  const invalid=structuredClone(s);invalid.textBox.x=200;
+  await page.locator('#project-file').setInputFiles({name:'invalid.kasane',mimeType:'application/json',buffer:Buffer.from(JSON.stringify(invalid))});await expect(page.locator('#toast')).toContainText('原稿を開けません');
+});
+
+test('moved text is at its new coordinates in real PNG export; editor frame is not exported',async({page},info)=>{
+  await ready(page);await page.locator('#text').fill('春夏');await changeBox(page,{width:80,height:60,x:70,y:110});
+  await page.locator('#export-button').click();const event=page.waitForEvent('download');await page.locator('#confirm-export').click();const file=await event;await file.saveAs(info.outputPath('moved.png'));
+  const data=(await fs.readFile(await file.path())).toString('base64');
+  const bounds=await page.evaluate(async base64=>{
+    const im=await createImageBitmap(await (await fetch('data:image/png;base64,'+base64)).blob());const c=document.createElement('canvas');c.width=im.width;c.height=im.height;const ctx=c.getContext('2d');ctx.drawImage(im,0,0);const d=ctx.getImageData(0,0,c.width,c.height).data;let left=c.width,top=c.height,right=0,bottom=0,count=0;
+    for(let y=0;y<c.height;y++)for(let x=0;x<c.width;x++){const i=(y*c.width+x)*4;if(d[i]<200||d[i+1]<200||d[i+2]<200){left=Math.min(left,x);top=Math.min(top,y);right=Math.max(right,x);bottom=Math.max(bottom,y);count++;}}
+    return {left:left*25.4/300,top:top*25.4/300,right:right*25.4/300,bottom:bottom*25.4/300,count};
+  },data);
+  expect(bounds.count).toBeGreaterThan(100);expect(bounds.left).toBeGreaterThanOrEqual(70);expect(bounds.left).toBeLessThan(73);expect(bounds.top).toBeGreaterThanOrEqual(110);expect(bounds.top).toBeLessThan(114);expect(bounds.right).toBeLessThan(90);expect(bounds.bottom).toBeLessThan(125);
+  await page.locator('#export-format').selectOption('pdf');const pdfEvent=page.waitForEvent('download');await page.locator('#confirm-export').click();await (await pdfEvent).saveAs(info.outputPath('moved.pdf'));
+});
