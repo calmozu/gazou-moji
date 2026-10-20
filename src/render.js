@@ -5,7 +5,18 @@ export const families = {
   textbook: '"Klee One", serif',
 };
 export const baseStyle = { family: 'sans', size: 24, bold: false, color: '#252923', glow: false, glowColor: '#ffffff', glowSize: 1.5 };
-export function dimensions(state) { return state.orientation === 'portrait' ? [210, 297] : [297, 210]; }
+export const pageFormats={
+  a4: {label:'A4'},
+  youtube: {label:'YouTube 横動画',pixels:[1920,1080]},
+  short: {label:'ショート動画',pixels:[1080,1920]},
+  'short-mini': {label:'ショート動画ミニ',pixels:[360,640],referencePixels:[1080,1920]},
+};
+export function pageFormat(state) { return pageFormats[state.pageSize || 'a4']; }
+export function pageScale(state) { const f=pageFormat(state); return f.referencePixels ? f.pixels[0]/f.referencePixels[0] : 1; }
+export function dimensions(state) {
+  const f=pageFormat(state),pixels=f.referencePixels || f.pixels;
+  return pixels ? pixels.map(n=>n*25.4/300) : state.orientation === 'portrait' ? [210,297] : [297,210];
+}
 export function textBounds(state) {
   const [w,h]=dimensions(state), m=state.margins;
   const b=state.textBox || {x:m.left,y:m.top,width:w-m.left-m.right,height:h-m.top-m.bottom};
@@ -13,7 +24,7 @@ export function textBounds(state) {
   return {x:Math.max(0,Math.min(w-width,b.x)),y:Math.max(0,Math.min(h-height,b.y)),width,height};
 }
 export function initialState() {
-  return { version: 1, title: '無題のかさね', text: '', styles: [], style: { ...baseStyle }, orientation: 'portrait', vertical: false, align: 'left', lineHeight: 1.65,
+  return { version: 1, title: '無題のかさね', text: '', styles: [], style: { ...baseStyle }, pageSize:'a4', orientation: 'portrait', vertical: false, align: 'left', lineHeight: 1.65,
     margins: { top: 20, right: 20, bottom: 20, left: 20 }, textBox: {x:35,y:40,width:140,height:100}, paper: '#ffffff',
     background: { src: '', fit: 'cover', opacity: 100, zoom: 1, x: 0, y: 0 } };
 }
@@ -32,7 +43,7 @@ function font(ctx, style) {
 const noStart = /^[、。，．？！：；）」』】〕〉》ーぁぃぅぇぉっゃゅょァィゥェォッャュョ]$/u;
 const segmenter = new Intl.Segmenter('ja', { granularity: 'grapheme' });
 export function render(canvas, state, image, { dpi = 120 } = {}) {
-  const [w,h] = dimensions(state), scale = dpi/25.4;
+  const [w,h] = dimensions(state), scale = dpi/25.4*pageScale(state);
   canvas.width = Math.round(w*scale); canvas.height = Math.round(h*scale);
   const ctx = canvas.getContext('2d'); ctx.scale(scale,scale);
   ctx.fillStyle = state.paper; ctx.fillRect(0,0,w,h);
@@ -90,6 +101,7 @@ export function validateProject(value) {
   const color=v=>typeof v==='string' && /^#[0-9a-f]{6}$/i.test(v);
   const validStyle=v=>v && Object.hasOwn(families,v.family) && num(v.size,6,200) && typeof v.bold==='boolean' && color(v.color) && typeof v.glow==='boolean' && color(v.glowColor) && num(v.glowSize,0.2,6);
   if (!s || s.version!==1 || typeof s.title!=='string' || s.title.length>100 || typeof s.text!=='string' || s.text.length>30000 || !['portrait','landscape'].includes(s.orientation) || typeof s.vertical!=='boolean' || !['left','center','right'].includes(s.align) || !num(s.lineHeight,1,3) || !color(s.paper) || !validStyle(s.style) || !Array.isArray(s.styles) || s.styles.length>s.text.length || !s.styles.every(v=>v===null || validStyle(v)) || !s.margins || !['top','right','bottom','left'].every(k=>num(s.margins[k],0,70))) throw new Error('対応していない原稿ファイルです。');
+  if (s.pageSize!=null && !Object.hasOwn(pageFormats,s.pageSize)) throw new Error('対応していない用紙サイズです。');
   if (s.textBox!=null) {
     const t=s.textBox,[w,h]=dimensions(s);
     if (!num(t.x,0,w)||!num(t.y,0,h)||!num(t.width,20,w)||!num(t.height,20,h)||t.x+t.width>w+.0001||t.y+t.height>h+.0001) throw new Error('文字枠の位置や大きさを読み込めません。');

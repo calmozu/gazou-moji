@@ -149,3 +149,43 @@ test('moved text is at its new coordinates in real PNG export; editor frame is n
   expect(bounds.count).toBeGreaterThan(100);expect(bounds.left).toBeGreaterThanOrEqual(70);expect(bounds.left).toBeLessThan(73);expect(bounds.top).toBeGreaterThanOrEqual(110);expect(bounds.top).toBeLessThan(114);expect(bounds.right).toBeLessThan(90);expect(bounds.bottom).toBeLessThan(125);
   await page.locator('#export-format').selectOption('pdf');const pdfEvent=page.waitForEvent('download');await page.locator('#confirm-export').click();await (await pdfEvent).saveAs(info.outputPath('moved.pdf'));
 });
+
+for(const [preset,width,height] of [['youtube',1920,1080],['short',1080,1920],['short-mini',360,640]]){
+  test(`${preset} produces exact PNG size and matching PDF aspect; selection persists`,async({page},info)=>{
+    await ready(page);await page.locator('#text').fill('春の便り');await background(page);await page.locator('#tab-page').click();await page.locator('#page-size').selectOption(preset);
+    await expect(page.locator('#page-meta')).toContainText(`${width} × ${height} px`);await expect(page.locator('#page-orientation')).toBeHidden();
+    await expect.poll(()=>page.locator('#canvas').evaluate(c=>[c.width,c.height])).toEqual([width,height]);
+    await page.locator('#tab-text').click();await page.locator('#compact-text-box').click();
+    await expect(page.locator('#box-width').locator('..').locator('[data-layout-unit]')).toHaveText('px');
+    await expect(page.locator('#font-size-unit')).toHaveText('px');const fontPx=Number(await page.locator('#size').inputValue());await page.locator('#larger').click();expect(Number(await page.locator('#size').inputValue())).toBeCloseTo(fontPx+2,0);
+    const s=await project(page);expect(s.pageSize).toBe(preset);
+    const baseX=Number(await page.locator('#box-x').inputValue());await page.locator('#text-box').focus();await page.keyboard.press('ArrowLeft');expect(Number(await page.locator('#box-x').inputValue())).toBeCloseTo(Math.max(0,baseX-1),0);
+    await page.locator('#export-button').click();let event=page.waitForEvent('download');await page.locator('#confirm-export').click();let file=await event;await file.saveAs(info.outputPath(preset+'.png'));
+    const png=await fs.readFile(await file.path());expect(png.readUInt32BE(16)).toBe(width);expect(png.readUInt32BE(20)).toBe(height);
+    await page.locator('#export-format').selectOption('pdf');event=page.waitForEvent('download');await page.locator('#confirm-export').click();file=await event;await file.saveAs(info.outputPath(preset+'.pdf'));
+    const pdf=(await fs.readFile(await file.path())).toString('latin1');const box=pdf.match(/\/MediaBox \[0 0 ([\d.]+) ([\d.]+)\]/);expect(Number(box[1])/Number(box[2])).toBeCloseTo(width/height,5);expect(Number(box[1])).toBeCloseTo(width*72/300,4);expect(Number(box[2])).toBeCloseTo(height*72/300,4);expect(pdf).toContain('/Subtype /Image');
+    await page.locator('#close-export').click();await expect(page.locator('#save-status')).toContainText('保存済み');await page.reload();await expect(page.locator('html')).toHaveAttribute('data-ready','true');await page.locator('#tab-page').click();await expect(page.locator('#page-size')).toHaveValue(preset);
+    await page.setViewportSize({width:390,height:844});expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+    await page.locator('#page-size').selectOption('a4');await expect(page.locator('#page-orientation')).toBeVisible();await expect(page.locator('#page-meta')).toContainText('210 × 297 mm');
+  });
+}
+
+test('short mini keeps the short composition and reduces both dimensions by three',async({page})=>{
+  await ready(page);await page.locator('#text').fill('春夏');await page.locator('#tab-page').click();await page.locator('#page-size').selectOption('short');
+  const before=await project(page);await page.locator('#page-size').selectOption('short-mini');const after=await project(page);
+  expect(after.textBox).toEqual(before.textBox);expect(after.styles).toEqual(before.styles);expect(after.background).toEqual(before.background);
+  const result=await page.evaluate(async()=>{
+    const {render,initialState}=await import('/src/render.js');const s=initialState();s.text='春夏';s.pageSize='short';s.textBox={x:25,y:40,width:40,height:40};
+    const canvas=document.createElement('canvas');
+    function inkBounds(){const {width:w,height:h}=canvas,d=canvas.getContext('2d').getImageData(0,0,w,h).data;let left=w,top=h,right=0,bottom=0;for(let y=0;y<h;y++)for(let x=0;x<w;x++){const i=(y*w+x)*4;if(d[i]<180){left=Math.min(left,x);top=Math.min(top,y);right=Math.max(right,x);bottom=Math.max(bottom,y);}}return {w,h,left,top,right,bottom};}
+    const fullLayout=render(canvas,s,null,{dpi:300}),full=inkBounds();s.pageSize='short-mini';const miniLayout=render(canvas,s,null,{dpi:300}),mini=inkBounds();return {full,mini,fullLayout,miniLayout};
+  });
+  expect(result.fullLayout).toEqual(result.miniLayout);expect(result.full.w).toBe(result.mini.w*3);expect(result.full.h).toBe(result.mini.h*3);
+  for(const key of ['left','top','right','bottom'])expect(Math.abs(result.full[key]/3-result.mini[key])).toBeLessThan(2);
+});
+
+test('legacy A4 files and invalid page presets are handled without losing work',async({page})=>{
+  await ready(page);const old=await project(page);delete old.pageSize;old.text='前の原稿';old.styles=[];
+  await page.locator('#project-file').setInputFiles({name:'old.kasane',mimeType:'application/json',buffer:Buffer.from(JSON.stringify(old))});await page.locator('#tab-page').click();await expect(page.locator('#page-size')).toHaveValue('a4');await expect(page.locator('#page-meta')).toContainText('210 × 297 mm');
+  old.pageSize='unknown';await page.locator('#project-file').setInputFiles({name:'bad.kasane',mimeType:'application/json',buffer:Buffer.from(JSON.stringify(old))});await expect(page.locator('#toast')).toContainText('原稿を開けません');await expect(page.locator('#text')).toHaveValue('前の原稿');
+});

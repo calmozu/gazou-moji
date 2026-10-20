@@ -7,7 +7,7 @@ import '@fontsource/zen-maru-gothic/700.css';
 import '@fontsource/klee-one/400.css';
 import '@fontsource/klee-one/600.css';
 import './style.css';
-import { families, initialState, render, dimensions, textBounds, validateProject } from './render.js';
+import { families, initialState, render, dimensions, textBounds, validateProject, pageFormats, pageFormat, pageScale } from './render.js';
 import { saveDraft, loadDraft } from './storage.js';
 import { pngWithDpi } from './png.js';
 
@@ -33,12 +33,12 @@ document.querySelector('#app').innerHTML = `
    <p id="selection-info">選択なし · 設定は文字全体に反映します</p>
    <label class="field"><span class="label">フォント</span><select id="family"><option value="sans">角ゴシック</option><option value="serif">明朝</option><option value="round">丸ゴシック</option><option value="textbook">教科書風</option></select></label>
    <label class="label" for="size">文字サイズ</label><div class="size-buttons"><button id="smaller">小さく −</button><button id="larger">大きく ＋</button></div>
-   <div class="row"><div class="number-unit"><input id="size" type="number" min="6" max="200" step="1" aria-label="文字サイズ"><span>pt</span></div><button id="bold" aria-pressed="false"><b>B</b> 太字</button><input class="color-input" id="color" type="color" aria-label="文字の色"></div>
+   <div class="row"><div class="number-unit"><input id="size" type="number" min="6" max="200" step="1" aria-label="文字サイズ"><span id="font-size-unit">pt</span></div><button id="bold" aria-pressed="false"><b>B</b> 太字</button><input class="color-input" id="color" type="color" aria-label="文字の色"></div>
   </div>
   <div class="section"><h2>文字枠の位置と大きさ</h2>
    <p class="hint" id="text-box-help">用紙上の緑の枠をドラッグして移動。四隅の丸をつかむと大きさを変えられます。</p>
    <div class="margin-grid" style="margin-top:14px">
-    ${[['x','左から'],['y','上から'],['width','幅'],['height','高さ']].map(([key,label])=>`<label class="field"><span class="label">${label}</span><div class="number-unit"><input id="box-${key}" data-box="${key}" type="number" min="${key==='width'||key==='height'?20:0}" step="1"><span>mm</span></div></label>`).join('')}
+    ${[['x','左から'],['y','上から'],['width','幅'],['height','高さ']].map(([key,label])=>`<label class="field"><span class="label">${label}</span><div class="number-unit"><input id="box-${key}" data-box="${key}" type="number" min="${key==='width'||key==='height'?20:0}" step="1"><span data-layout-unit>mm</span></div></label>`).join('')}
    </div><div class="row" style="margin-top:14px"><button id="compact-text-box">小さな枠にする</button><button id="center-text-box">用紙の中央へ</button></div>
   </div>
   <div class="section"><h2>文字の並べ方</h2>
@@ -72,18 +72,19 @@ document.querySelector('#app').innerHTML = `
   <div class="text-mode-note">背景タブでは、用紙上をドラッグして画像を移動できます。2本指でピンチすると拡大できます。「画面いっぱい」での調整に便利です。</div>
  </div>
  <div id="panel-page" class="panel" role="tabpanel" aria-labelledby="tab-page" hidden>
-  <div class="section"><p class="eyebrow">PAPER</p><h2>余白を、整える。<span class="badge">A4</span></h2>
-   <div class="segmented" role="group" aria-label="用紙の向き"><button data-orientation="portrait" class="active">▯ 縦</button><button data-orientation="landscape">▭ 横</button></div>
+  <div class="section"><p class="eyebrow">PAPER</p><h2>余白を、整える。<span class="badge" id="page-badge">A4</span></h2>
+   <label class="field"><span class="label">サイズ</span><select id="page-size">${Object.entries(pageFormats).map(([key,format])=>`<option value="${key}">${format.label}${format.pixels?` · ${format.pixels.join(' × ')} px`:''}</option>`).join('')}</select></label>
+   <div id="page-orientation" class="segmented" role="group" aria-label="用紙の向き"><button data-orientation="portrait" class="active">▯ 縦</button><button data-orientation="landscape">▭ 横</button></div>
    <div class="row" style="margin-top:16px"><label class="label" for="paper-color">用紙の色</label><input id="paper-color" class="color-input" type="color" value="#ffffff"></div>
   </div>
-  <div class="section"><h2>文字範囲の余白 <span>mm / 20 mm = 2 cm</span></h2><div class="margin-grid">
-   ${[['top','上'],['bottom','下'],['left','左'],['right','右']].map(([key,label])=>`<label class="field"><span class="label">${label}</span><div class="number-unit"><input id="margin-${key}" data-margin="${key}" type="number" min="0" max="70" value="20"><span>mm</span></div></label>`).join('')}
+  <div class="section"><h2>文字範囲の余白 <span id="margin-unit-hint">mm / 20 mm = 2 cm</span></h2><div class="margin-grid">
+   ${[['top','上'],['bottom','下'],['left','左'],['right','右']].map(([key,label])=>`<label class="field"><span class="label">${label}</span><div class="number-unit"><input id="margin-${key}" data-margin="${key}" type="number" min="0" max="70" value="20"><span data-layout-unit>mm</span></div></label>`).join('')}
    </div><label class="check" style="margin-top:12px"><input id="show-guides" type="checkbox" checked>余白ガイドを表示</label><p class="hint">余白を変えると、文字枠をその内側いっぱいに戻します。枠とガイドは書き出されません。</p>
   </div>
   <div class="section"><h2>原稿を残す</h2><p class="hint">編集中の原稿は、このブラウザーに自動保存します。別の端末でも編集するには、上の「原稿を保存」でファイルを保存してください。</p><button id="new-document" style="margin-top:14px">新しい原稿</button></div>
  </div>
 </aside>
-<main class="stage" aria-label="A4プレビュー">
+<main class="stage" aria-label="仕上がりプレビュー">
  <div class="stage-bar"><div><input id="title" class="document-name" maxlength="100" aria-label="原稿の名前"></div><div class="stage-meta"><span id="page-meta">A4 · 210 × 297 mm</span><div class="history"><button id="undo" aria-label="元に戻す" title="元に戻す">↶</button><button id="redo" aria-label="やり直す" title="やり直す">↷</button></div><button id="fullscreen" class="quiet" aria-label="画面いっぱいで編集" title="画面いっぱいで編集">⛶</button></div></div>
  <div class="canvas-scroll" id="canvas-scroll"><div class="paper-wrap" id="paper-wrap"><canvas id="canvas" aria-label="仕上がりのプレビュー"></canvas><div class="guides" id="guides"></div><div id="text-box" class="text-box" role="group" tabindex="0" aria-label="文字枠を移動" aria-describedby="text-box-help"><span class="text-box-caption" aria-hidden="true">文字枠 · ドラッグで移動</span>${[['nw','左上'],['ne','右上'],['sw','左下'],['se','右下']].map(([key,label])=>`<button type="button" class="box-handle ${key}" data-resize="${key}" aria-label="文字枠の${label}を調整" title="ドラッグで大きさを変更"></button>`).join('')}</div><div class="empty-note" id="empty-note"><b>余白から、はじめよう。</b><small>左の文字欄に、ことばを添えて。</small></div></div></div>
  <div class="stage-footer"><span id="save-status" role="status"><i class="dot"></i>このブラウザーに自動保存</span><span id="overflow" class="warning" role="status" hidden>文字が枠に収まりません。枠を広げるか文字を小さくしてください。</span><span id="char-count">0 文字</span></div>
@@ -91,7 +92,7 @@ document.querySelector('#app').innerHTML = `
 </div>
 <input id="image-file" type="file" accept="image/jpeg,image/png,image/webp" hidden>
 <input id="project-file" type="file" accept=".kasane,.json,application/json" hidden>
-<dialog id="export-dialog" aria-labelledby="export-heading"><div class="dialog-top"><h2 id="export-heading">仕上がりを確認</h2><button id="close-export" class="quiet" aria-label="閉じる">✕</button></div><p class="hint">A4・300 dpiで保存します。背景・文字・光彩を一枚に重ねます。</p><img id="export-preview" alt="書き出す画像のプレビュー"><p id="export-warning" class="warning" hidden>文字枠に収まらない文字があります。編集画面で調整してください。</p><div class="export-options"><select id="export-format" aria-label="書き出す形式"><option value="png">PNG 画像</option><option value="pdf">PDF（A4）</option></select><button id="confirm-export" class="primary">保存する ↗</button></div><p class="hint">iPadでは保存後、共有ボタンから「画像を保存」や「ファイルに保存」を選べます。</p></dialog>
+<dialog id="export-dialog" aria-labelledby="export-heading"><div class="dialog-top"><h2 id="export-heading">仕上がりを確認</h2><button id="close-export" class="quiet" aria-label="閉じる">✕</button></div><p class="hint" id="export-size-hint">A4・300 dpiで保存します。背景・文字・光彩を一枚に重ねます。</p><img id="export-preview" alt="書き出す画像のプレビュー"><p id="export-warning" class="warning" hidden>文字枠に収まらない文字があります。編集画面で調整してください。</p><div class="export-options"><select id="export-format" aria-label="書き出す形式"><option value="png">PNG 画像</option><option value="pdf">PDF</option></select><button id="confirm-export" class="primary">保存する ↗</button></div><p class="hint">iPadでは保存後、共有ボタンから「画像を保存」や「ファイルに保存」を選べます。</p></dialog>
 <dialog id="new-dialog" aria-labelledby="new-heading"><div class="dialog-top"><h2 id="new-heading">新しい原稿にしますか？</h2></div><p class="hint">現在の原稿は置き換わります。必要なら先に「原稿を保存」してください。</p><div class="export-options"><button id="cancel-new">戻る</button><button id="confirm-new" class="primary">新しくする</button></div></dialog>
 <div class="toast" id="toast" role="status" hidden></div>`;
 
@@ -128,7 +129,7 @@ async function ensureFonts() {
 function scheduleDraw(){ cancelAnimationFrame(drawing); drawing=requestAnimationFrame(draw); }
 async function draw(){
   try { await ensureFonts(); } catch { toast('フォントを読み込めませんでした。通信を確認してください。'); }
-  const result=render(canvas,state,image); overflow=result.overflow;
+  const result=render(canvas,state,image,{dpi:pageFormat(state).pixels?300:120}); overflow=result.overflow;
   $('overflow').hidden=!overflow; $('empty-note').hidden=!!state.text || !!image;
   $('char-count').textContent=`${[...state.text].length.toLocaleString()} 文字`;
   fitPaper();
@@ -145,13 +146,27 @@ function syncControls(){
   for(const k in state.margins) $('margin-'+k).value=state.margins[k];
   document.querySelectorAll('[data-align]').forEach((b,i)=>{b.classList.toggle('active',b.dataset.align===state.align); b.textContent=state.vertical?['上揃え','中央','下揃え'][i]:['左揃え','中央','右揃え'][i];});
   document.querySelectorAll('[data-orientation]').forEach(b=>b.classList.toggle('active',b.dataset.orientation===state.orientation));
-  $('page-meta').textContent=`A4 · ${dimensions(state).join(' × ')} mm`;
+  const format=pageFormat(state), video=!!format.pixels, factor=layoutFactor();
+  $('page-size').value=state.pageSize || 'a4';$('page-badge').textContent=video?'VIDEO':'A4';$('page-orientation').hidden=video;
+  $('page-meta').textContent=video?`${format.label} · ${format.pixels.join(' × ')} px`:`A4 · ${dimensions(state).join(' × ')} mm`;
+  $('export-size-hint').textContent=video?`${format.label}：PNGは ${format.pixels.join(' × ')} px、PDFは同じ縦横比で保存します。`:'A4・300 dpiで保存します。背景・文字・光彩を一枚に重ねます。';
+  $('export-format').querySelector('[value=pdf]').textContent=video?'PDF（同じ比率）':'PDF（A4）';
+  $('margin-unit-hint').textContent=video?'px':'mm / 20 mm = 2 cm';
+  document.querySelectorAll('[data-layout-unit]').forEach(el=>el.textContent=video?'px':'mm');
+  const [dw,dh]=dimensions(state);
+  for(const key in state.margins){
+    const el=$('margin-'+key), other={left:'right',right:'left',top:'bottom',bottom:'top'}[key];
+    el.value=Math.round(state.margins[key]*factor*10)/10;
+    el.max=Math.floor(Math.max(0,Math.min(70,(key==='left'||key==='right'?dw:dh)-state.margins[other]-20))*factor);
+  }
   $('bg-thumb').hidden=!image; $('remove-image').hidden=!image; if(image) $('bg-thumb').src=image.src;
   $('paper-wrap').classList.toggle('adjust',tab==='background');
+  const fontFactor=fontSizeFactor();$('size').value=Math.round(s.size*fontFactor*10)/10;
+  $('size').min=6*fontFactor;$('size').max=200*fontFactor;$('font-size-unit').textContent=video?'px':'pt';
   const box=textBounds(state), [pageWidth,pageHeight]=dimensions(state);
   for(const [key,value] of Object.entries(box)) {
-    const el=$('box-'+key); el.value=Math.round(value*10)/10;
-    el.max=key==='x'?pageWidth-box.width:key==='y'?pageHeight-box.height:key==='width'?pageWidth-box.x:pageHeight-box.y;
+    const el=$('box-'+key); el.value=Math.round(value*factor*10)/10;el.min=key==='width'||key==='height'?Math.ceil(20*factor):0;
+    el.max=Math.floor((key==='x'?pageWidth-box.width:key==='y'?pageHeight-box.height:key==='width'?pageWidth-box.x:pageHeight-box.y)*factor);
   }
   $('text-box').hidden=tab!=='text'; fitPaper();
   selectionInfo(); updateHistory();
@@ -179,12 +194,12 @@ text.addEventListener('input',()=>{
   state.text=next;selection=[text.selectionStart,text.selectionEnd];changed({sync:false});selectionInfo();
 });
 for(const [id,key] of [['family','family'],['color','color'],['glow-color','glowColor']]) $(id).addEventListener('change',e=>applyStyle({[key]:e.target.value}));
-$('size').addEventListener('change',e=>{const v=Number(e.target.value);if(!Number.isFinite(v)||v<6||v>200){syncControls();return;}applyStyle({size:v});});
+$('size').addEventListener('change',e=>{const v=Number(e.target.value)/fontSizeFactor();if(!Number.isFinite(v)||v<6||v>200){syncControls();return;}applyStyle({size:v});});
 $('size').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();e.target.blur();}});
 for(const [id,delta] of [['smaller',-2],['larger',2]]) $(id).onclick=()=>{
   const [a,b]=selection;
-  if(a===b) applyStyle({size:Math.max(6,Math.min(200,activeStyle().size+delta))});
-  else {remember(); for(let i=a;i<b;i++){const s={...state.style,...state.styles[i]};state.styles[i]={...s,size:Math.max(6,Math.min(200,s.size+delta))};}changed();}
+  if(a===b) applyStyle({size:Math.max(6,Math.min(200,activeStyle().size+delta/fontSizeFactor()))});
+  else {remember(); for(let i=a;i<b;i++){const s={...state.style,...state.styles[i]};state.styles[i]={...s,size:Math.max(6,Math.min(200,s.size+delta/fontSizeFactor()))};}changed();}
 };
 $('bold').onclick=()=>applyStyle({bold:!activeStyle().bold});
 $('glow').onchange=e=>applyStyle({glow:e.target.checked});
@@ -207,14 +222,30 @@ for(const id of ['line-height','opacity','zoom','image-x','image-y']) {
 }
 $('fit').onchange=e=>updateValue(()=>{Object.assign(state.background,{fit:e.target.value,x:0,y:0,zoom:1});});
 $('reset-image').onclick=()=>updateValue(()=>Object.assign(state.background,{x:0,y:0,zoom:1}));
-document.querySelectorAll('[data-margin]').forEach(el=>el.onchange=()=>updateValue(()=>{state.margins[el.dataset.margin]=Math.max(0,Math.min(70,Number(el.value)||0));state.textBox=null;}));
+function layoutFactor(){return pageFormat(state).pixels?300/25.4*pageScale(state):1;}
+function fontSizeFactor(){return pageFormat(state).pixels?300/72*pageScale(state):1;}
+function fitMargins(){
+  const [w,h]=dimensions(state);
+  for(const [first,second,size] of [['left','right',w],['top','bottom',h]]){
+    const total=state.margins[first]+state.margins[second],available=Math.max(0,size-20);
+    if(total>available){state.margins[first]*=available/total;state.margins[second]*=available/total;}
+  }
+}
+document.querySelectorAll('[data-margin]').forEach(el=>el.onchange=()=>updateValue(()=>{state.margins[el.dataset.margin]=Math.max(0,Math.min(Number(el.max)/layoutFactor(),Number(el.value)/layoutFactor()||0));state.textBox=null;}));
+$('page-size').onchange=e=>updateValue(()=>{
+  const [oldW,oldH]=dimensions(state),box=textBounds(state);state.pageSize=e.target.value;
+  const [w,h]=dimensions(state),rx=w/oldW,ry=h/oldH;
+  state.textBox=textBounds({...state,textBox:{x:box.x*rx,y:box.y*ry,width:box.width*rx,height:box.height*ry}});
+  for(const key in state.margins)state.margins[key]=Math.min(70,state.margins[key]*(key==='left'||key==='right'?rx:ry));
+  fitMargins();state.background.x=Math.max(-300,Math.min(300,state.background.x*rx));state.background.y=Math.max(-300,Math.min(300,state.background.y*ry));
+});
 document.querySelectorAll('[data-align]').forEach(b=>b.onclick=()=>updateValue(()=>state.align=b.dataset.align));
 document.querySelectorAll('[data-orientation]').forEach(b=>b.onclick=()=>updateValue(()=>{state.orientation=b.dataset.orientation;state.textBox=textBounds(state);}));
 document.querySelectorAll('[data-box]').forEach(el=>el.onchange=()=>{
-  const value=Number(el.value);if(el.value===''||!Number.isFinite(value)){syncControls();return;}
+  const value=Number(el.value)/layoutFactor();if(el.value===''||!Number.isFinite(value)){syncControls();return;}
   updateValue(()=>{const box=textBounds(state);box[el.dataset.box]=value;state.textBox=textBounds({...state,textBox:box});});
 });
-$('compact-text-box').onclick=()=>updateValue(()=>{const box=textBounds(state);state.textBox=textBounds({...state,textBox:{...box,width:140,height:100}});});
+$('compact-text-box').onclick=()=>updateValue(()=>{const box=textBounds(state),[w,h]=dimensions(state),video=!!pageFormat(state).pixels;state.textBox=textBounds({...state,textBox:{...box,width:video?w*2/3:140,height:video?h/3:100}});});
 $('center-text-box').onclick=()=>updateValue(()=>{const [w,h]=dimensions(state),box=textBounds(state);state.textBox={...box,x:(w-box.width)/2,y:(h-box.height)/2};});
 function setTab(name){tab=name;document.querySelectorAll('[data-tab]').forEach(b=>{const active=b.dataset.tab===name;b.setAttribute('aria-selected',active);b.tabIndex=active?0:-1;$('panel-'+b.dataset.tab).hidden=!active;});syncControls();}
 document.querySelectorAll('[data-tab]').forEach(b=>{b.onclick=()=>setTab(b.dataset.tab);b.onkeydown=e=>{if(['ArrowLeft','ArrowRight','Home','End'].includes(e.key)){e.preventDefault();const tabs=['text','background','page'];let i=tabs.indexOf(tab);i=e.key==='Home'?0:e.key==='End'?2:(i+(e.key==='ArrowLeft'?-1:1)+3)%3;setTab(tabs[i]);$('tab-'+tabs[i]).focus();}};});
@@ -268,7 +299,7 @@ function toggleFullscreen(){document.body.classList.toggle('fullscreen');$('full
 $('fullscreen').onclick=toggleFullscreen;
 let exportCanvas=null;
 async function openExport(){
-  try{await ensureFonts(); exportCanvas=document.createElement('canvas');const result=render(exportCanvas,state,image,{dpi:150});$('export-warning').hidden=!result.overflow;$('export-preview').src=exportCanvas.toDataURL('image/png');$('export-dialog').showModal();}catch{toast('プレビューを作れませんでした。画像のサイズを小さくしてお試しください。');}
+  try{await ensureFonts(); exportCanvas=document.createElement('canvas');const result=render(exportCanvas,state,image,{dpi:pageFormat(state).pixels?300:150});$('export-warning').hidden=!result.overflow;$('export-preview').src=exportCanvas.toDataURL('image/png');$('export-dialog').showModal();}catch{toast('プレビューを作れませんでした。画像のサイズを小さくしてお試しください。');}
 }
 $('export-button').onclick=openExport;$('preview-button').onclick=openExport;$('close-export').onclick=()=>$('export-dialog').close();
 $('confirm-export').onclick=async()=>{
@@ -276,8 +307,8 @@ $('confirm-export').onclick=async()=>{
   try{
     await ensureFonts();const output=document.createElement('canvas');render(output,state,image,{dpi:300});
     if($('export-format').value==='pdf'){
-      const {jsPDF}=await import('jspdf');const pdf=new jsPDF({orientation:state.orientation,unit:'mm',format:'a4',compress:true});
-      const [w,h]=dimensions(state);pdf.addImage(output.toDataURL('image/png'),'PNG',0,0,w,h,undefined,'FAST');pdf.setProperties({title:state.title,creator:'かさね'});download(pdf.output('blob'),filename()+'.pdf');
+      const {jsPDF}=await import('jspdf');const [w,h]=dimensions(state).map(n=>n*pageScale(state));const pdf=new jsPDF({orientation:w>h?'landscape':'portrait',unit:'mm',format:pageFormat(state).pixels?[w,h]:'a4',compress:true});
+      pdf.addImage(output.toDataURL('image/png'),'PNG',0,0,w,h,undefined,'FAST');pdf.setProperties({title:state.title,creator:'かさね'});download(pdf.output('blob'),filename()+'.pdf');
     }else{
       const blob=await pngWithDpi(output,300);download(blob,filename()+'.png');
     }
@@ -311,7 +342,7 @@ textBoxElement.addEventListener('pointermove',e=>{
 for(const name of ['pointerup','pointercancel','lostpointercapture'])textBoxElement.addEventListener(name,e=>{if(boxGesture?.id===e.pointerId)boxGesture=null;});
 textBoxElement.addEventListener('keydown',e=>{
   if(!['ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(e.key))return;
-  e.preventDefault();const delta=e.shiftKey?5:1,box=textBounds(state),corner=e.target.closest('[data-resize]')?.dataset.resize;
+  e.preventDefault();const delta=(e.shiftKey?5:1)/layoutFactor(),box=textBounds(state),corner=e.target.closest('[data-resize]')?.dataset.resize;
   const dx=e.key==='ArrowLeft'?-delta:e.key==='ArrowRight'?delta:0,dy=e.key==='ArrowUp'?-delta:e.key==='ArrowDown'?delta:0;
   updateValue(()=>{
     if(!corner){box.x+=dx;box.y+=dy;}
