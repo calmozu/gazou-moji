@@ -1,3 +1,5 @@
+import {createCutoutDialog} from './cutout.js';
+import {imageSourceBudget} from './cutout-settings.js';
 import { svgImageSource } from './svg-import.js';
 import { dimensions, imageBounds } from './render.js';
 
@@ -12,6 +14,7 @@ export const overlayPanel=`
   <label id="overlay-select-field" class="field" hidden><span class="label">編集する画像レイヤー</span><select id="overlay-select"></select></label>
  </div>
  <div id="overlay-controls" hidden>
+  <div class="section"><h2>背景を透明にする</h2><button id="cutout-overlay">背景を切り抜く</button><button id="restore-overlay" hidden>元画像に戻す</button><p class="hint">背景色を選んで消す／人物を自動で残す、の2通りで調整できます。</p><button id="save-overlay-png" class="clipboard-paste">この画像を透過PNGで保存</button><p class="hint">この画像だけを透明な背景で保存します。用紙全体の保存は上の「PNGで書き出す」から。</p></div>
   <div class="section"><h2>位置と大きさ</h2><p class="hint" id="overlay-help">用紙上の青い枠をドラッグして移動。四隅の丸で縦横比を保って大きさを変えられます。</p>
    <div class="margin-grid" style="margin-top:14px">${[['x','左から'],['y','上から'],['width','幅'],['height','高さ']].map(([key,label])=>`<label class="field"><span class="label">${label}</span><div class="number-unit"><input id="overlay-${key}" data-overlay-value="${key}" type="number" min="0" step="0.1"><span data-layout-unit>mm</span></div></label>`).join('')}</div>
    <p class="hint">幅・高さは連動します。</p><button id="center-overlay">用紙の中央へ</button>
@@ -25,9 +28,10 @@ export const overlayPanel=`
  </div>
 </div>`;
 
-export function createOverlayEditor({getState,getImages,getTab,remember,changed,toast,readDataURL,decodeImage,layoutFactor,onAdded}){
+export function createOverlayEditor({getState,getImages,getTab,remember,changed,toast,readDataURL,decodeImage,layoutFactor,onAdded,saveImage}){
  const $=id=>document.getElementById(id),host=document.createElement('div');host.id='image-frames';$('paper-wrap').append(host);
  let selectedId=null,gesture=null,listKey='',loading=false;
+ const openCutout=createCutoutDialog({decodeImage});
  const items=()=>getState().overlays || [],active=()=>items().find(item=>item.id===selectedId);
  function commit(fn){remember();fn();changed();}
  function select(id){selectedId=id;sync();}
@@ -61,10 +65,25 @@ export function createOverlayEditor({getState,getImages,getTab,remember,changed,
    frame.querySelectorAll('button').forEach(button=>button.hidden=!isSelected);
   });
   if(!selected)return;
+  $('restore-overlay').hidden=!selected.originalSrc;
+  for(const id of ['cutout-overlay','restore-overlay','save-overlay-png'])$(id).disabled=loading;
   for(const key of ['x','y','width','height']){const el=$('overlay-'+key);el.value=+(selected[key]*factor).toFixed(1);el.min=key==='x'||key==='y'?0:.1;el.max=+((key==='x'?w-selected.width:key==='y'?h-selected.height:key==='width'?Math.min(w,h*selected.width/selected.height):Math.min(h,w*selected.height/selected.width))*factor).toFixed(1);}
   $('overlay-opacity').value=selected.opacity;$('overlay-opacity-value').value=selected.opacity+'%';$('overlay-placement').value=selected.placement;
   const index=items().indexOf(selected);$('overlay-backward').disabled=index===0;$('overlay-forward').disabled=index===items().length-1;
  }
+ async function replaceSource(item,state,src,settings){
+  const image=await decodeImage(src);if(getState()!==state||!items().includes(item))return;
+  const replacement={...item,src};
+  if(settings){replacement.originalSrc=item.originalSrc||item.src;replacement.cutoutSettings=settings;}else{delete replacement.originalSrc;delete replacement.cutoutSettings;}
+  if(src.length>12000000||imageSourceBudget(items().map(layer=>layer===item?replacement:layer))>30000000)throw new Error('画像の合計サイズが大きすぎます。不要な画像を削除してからお試しください。');
+  remember();if(!settings){delete item.originalSrc;delete item.cutoutSettings;}Object.assign(item,replacement);getImages().set(src,image);changed();
+ }
+ $('cutout-overlay').onclick=async()=>{
+  const item=active(),state=getState();if(!item||loading)return;
+  try{const result=await openCutout(item.originalSrc||item.src,item.cutoutSettings);if(!result||getState()!==state||!items().includes(item))return;loading=true;sync();await replaceSource(item,state,result.src,result.settings);toast('背景を切り抜きました。元画像への復元もできます。');}catch(error){toast(error.message);}finally{loading=false;sync();}
+ };
+ $('restore-overlay').onclick=async()=>{const item=active(),state=getState();if(!item?.originalSrc||loading)return;loading=true;sync();try{await replaceSource(item,state,item.originalSrc);toast('元画像に戻しました。');}catch(error){toast(error.message);}finally{loading=false;sync();}};
+ $('save-overlay-png').onclick=async()=>{const item=active();if(!item||loading)return;loading=true;sync();try{const image=getImages().get(item.src)||await decodeImage(item.src),canvas=document.createElement('canvas');canvas.width=image.naturalWidth;canvas.height=image.naturalHeight;canvas.getContext('2d').drawImage(image,0,0);const blob=await new Promise(resolve=>canvas.toBlob(resolve,'image/png'));if(!blob)throw new Error('PNGを保存できませんでした。');saveImage(blob);}catch(error){toast(error.message);}finally{loading=false;sync();}};
  $('overlay-select').onchange=e=>select(e.target.value);
  $('add-overlay').onclick=()=>$('overlay-file').click();
  $('overlay-file').onchange=e=>{const file=e.target.files[0];e.target.value='';if(file)importFile(file);};
@@ -79,7 +98,7 @@ export function createOverlayEditor({getState,getImages,getTab,remember,changed,
    const original=await decodeImage(isSVG?await svgImageSource(file):await readDataURL(file)),ratio=Math.min(1,2048/Math.max(original.naturalWidth,original.naturalHeight));
    const canvas=document.createElement('canvas');canvas.width=Math.max(1,Math.round(original.naturalWidth*ratio));canvas.height=Math.max(1,Math.round(original.naturalHeight*ratio));canvas.getContext('2d').drawImage(original,0,0,canvas.width,canvas.height);
    const src=canvas.toDataURL('image/png');
-   if(src.length>12000000||items().reduce((sum,item)=>sum+item.src.length,0)+src.length>30000000)throw new Error('画像が大きすぎます。小さな画像を選ぶか、不要な画像を削除してください。');
+   if(src.length>12000000||imageSourceBudget(items())+src.length>30000000)throw new Error('画像が大きすぎます。小さな画像を選ぶか、不要な画像を削除してください。');
    const image=await decodeImage(src);if(getState()!==state)return;
    const [w,h]=dimensions(state),scale=Math.min(w*.5/image.naturalWidth,h*.5/image.naturalHeight),width=image.naturalWidth*scale,height=image.naturalHeight*scale;
    const item={id:crypto.randomUUID(),name:file.name.slice(0,150),src,x:(w-width)/2,y:(h-height)/2,width,height,opacity:100,placement:'front'};

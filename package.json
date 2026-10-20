@@ -7,7 +7,10 @@
     "dev": "vite --host 0.0.0.0",
     "build": "vite build",
     "preview": "vite preview --host 0.0.0.0",
-    "test": "playwright test"
+    "test": "playwright test",
+    "prepare:cutout": "node scripts/prepare-cutout-assets.mjs",
+    "predev": "npm run prepare:cutout",
+    "prebuild": "npm run prepare:cutout"
   },
   "dependencies": {
     "@fontsource/dela-gothic-one": "^5.3.0",
@@ -20,6 +23,7 @@
     "@fontsource/yomogi": "^5.3.0",
     "@fontsource/yuji-syuku": "^5.3.1",
     "@fontsource/zen-maru-gothic": "^5.2.0",
+    "@mediapipe/selfie_segmentation": "^0.1.1675465747",
     "jspdf": "^4.2.0"
   },
   "devDependencies": {

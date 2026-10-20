@@ -1,3 +1,4 @@
+import {validCutout,imageSourceBudget} from './cutout-settings.js';
 import { backlightDefaults, drawBacklights, validBacklight } from './backlight.js';
 import { paperFillDefaults, paintPaper, validPaperFill } from './paper-fill.js';
 import { effectDefaults } from './text-effects.js';
@@ -185,12 +186,14 @@ export function validateProject(value) {
   }
   if(s.overlays!=null){
     if(!Array.isArray(s.overlays)||s.overlays.length>12)throw new Error('重ねる画像を読み込めません。');
-    const ids=new Set(),[w,h]=dimensions(s);let total=0;
+    const ids=new Set(),[w,h]=dimensions(s);
     for(const item of s.overlays){
       if(!item||typeof item.id!=='string'||item.id.length>80||ids.has(item.id)||typeof item.name!=='string'||item.name.length>150||typeof item.src!=='string'||item.src.length>12000000||!/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(item.src)||!num(item.opacity,0,100)||!['front','back'].includes(item.placement)||!num(item.x,0,w)||!num(item.y,0,h)||!num(item.width,.1,w)||!num(item.height,.1,h)||item.x+item.width>w+.0001||item.y+item.height>h+.0001)throw new Error('重ねる画像の設定を読み込めません。');
-      ids.add(item.id);total+=item.src.length;
+      if(item.originalSrc!=null&&(typeof item.originalSrc!=='string'||item.originalSrc.length>12000000||!/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(item.originalSrc)))throw new Error('元画像を読み込めません。');
+      if(item.cutoutSettings!=null&&(!item.originalSrc||!validCutout(item.cutoutSettings)))throw new Error('切り抜き設定を読み込めません。');
+      ids.add(item.id);
     }
-    if(total>30000000)throw new Error('重ねる画像の合計サイズが大きすぎます。');
+    if(imageSourceBudget(s.overlays)>30000000)throw new Error('重ねる画像の合計サイズが大きすぎます。');
   }
   const b=s.background;
   if (!b || typeof b.src!=='string' || b.src.length>25000000 || (b.src && !/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(b.src)) || !['cover','contain','width','height'].includes(b.fit) || !num(b.opacity,0,100) || !num(b.zoom,1,5) || !num(b.x,-1000,1000) || !num(b.y,-1000,1000)) throw new Error('背景画像の設定を読み込めません。');
