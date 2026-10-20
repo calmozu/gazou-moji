@@ -283,3 +283,91 @@ test('alignment keeps a wide BOX2 intact and explains when it would leave the pa
   await ready(page);await changeBox(page,{width:50,x:140});await page.locator('#add-text-box').click();await changeBox(page,{x:0,width:100});
   const before=await project(page);await page.locator('#align-box-left').click();await expect(page.locator('#toast')).toContainText('BOX2の幅を小さく');expect((await project(page)).secondTextBox).toEqual(before.secondTextBox);
 });
+
+async function overlayUpload(page,color='#e02030',name='透過ロゴ.png'){
+  const data=await page.evaluate(color=>{const c=document.createElement('canvas');c.width=200;c.height=100;const ctx=c.getContext('2d');ctx.fillStyle=color;ctx.fillRect(50,25,100,50);return c.toDataURL().split(',')[1];},color);
+  await page.locator('#overlay-file').setInputFiles({name,mimeType:'image/png',buffer:Buffer.from(data,'base64')});
+  await expect(page.locator('#overlay-select')).toContainText(name);
+}
+async function overlayValue(page,key,value){await page.locator('#overlay-'+key).fill(String(value));await page.locator('#overlay-'+key).press('Tab');}
+
+test('six additional Japanese fonts load, render distinctly and survive selected-text editing and reload',async({page})=>{
+  await ready(page);await page.locator('#text').fill('春の便り、また会いましょう。');expect(await page.locator('#family option').count()).toBe(10);
+  const hashes=[];
+  for(const family of ['handwriting','brush','pop','heavy','decorative','reggae']){
+    await page.locator('#family').selectOption(family);
+    const result=await page.evaluate(async family=>{const {families}=await import('/src/render.js');const faces=await document.fonts.load('400 24px '+families[family],'春の便り、また会いましょう。');return {loaded:faces.length,ready:faces.every(face=>face.status==='loaded')};},family);
+    expect(result.loaded).toBeGreaterThan(0);expect(result.ready).toBe(true);
+    await expect.poll(()=>page.locator('#canvas').evaluate(c=>c.toDataURL())).not.toBe(hashes.at(-1)||'');
+    await page.waitForTimeout(60);hashes.push(await page.locator('#canvas').evaluate(c=>c.toDataURL()));
+  }
+  expect(new Set(hashes).size).toBe(6);
+  await page.locator('#text').evaluate(el=>{el.focus();el.setSelectionRange(0,2);el.dispatchEvent(new Event('select'));});await page.locator('#family').selectOption('handwriting');await page.locator('#bold').click();
+  const before=await project(page);expect(before.styles[0].family).toBe('handwriting');expect(before.styles[0].bold).toBe(true);expect(before.style.family).toBe('reggae');
+  await expect(page.locator('#save-status')).toContainText('保存済み');await page.reload();await expect(page.locator('html')).toHaveAttribute('data-ready','true');expect((await project(page)).styles).toEqual(before.styles);
+});
+
+test('transparent images move, resize with fixed proportions, undo, delete and persist independently of text',async({page})=>{
+  await ready(page);await page.locator('#text').fill('文字はそのまま');await page.locator('#tab-overlay').click();await overlayUpload(page);
+  let s=await project(page);expect(s.overlays).toHaveLength(1);const frame='.overlay-frame.selected',first=s.overlays[0];expect(first.width/first.height).toBe(2);
+  await drag(page,frame,-30,20);let moved=await project(page);expect(moved.text).toBe(s.text);expect(moved.overlays[0].x).toBeLessThan(first.x);expect(moved.overlays[0].y).toBeGreaterThan(first.y);
+  await drag(page,frame+' [data-image-resize=se]',-30,-15);let resized=await project(page);expect(resized.overlays[0].width).toBeLessThan(moved.overlays[0].width);expect(resized.overlays[0].width/resized.overlays[0].height).toBeCloseTo(2,8);
+  await page.locator('#undo').click();expect((await project(page)).overlays).toEqual(moved.overlays);await page.locator('#redo').click();expect((await project(page)).overlays).toEqual(resized.overlays);
+  await overlayValue(page,'width',60);await overlayValue(page,'x',20);await overlayValue(page,'y',30);s=await project(page);expect(s.overlays[0]).toMatchObject({x:20,y:30,width:60,height:30});
+  await page.locator(frame).focus();await page.keyboard.press('ArrowRight');expect((await project(page)).overlays[0].x).toBe(21);
+  await expect(page.locator('#save-status')).toContainText('保存済み');await page.reload();await expect(page.locator('html')).toHaveAttribute('data-ready','true');expect((await project(page)).overlays[0].x).toBe(21);
+  await page.locator('#tab-overlay').click();await page.locator('#delete-overlay').click();expect((await project(page)).overlays).toEqual([]);await expect(page.locator('#overlay-controls')).toBeHidden();await page.locator('#undo').click();expect((await project(page)).overlays[0].src).toBe(first.src);
+  const portable=await project(page);await page.locator('#project-file').setInputFiles({name:'images.kasane',mimeType:'application/json',buffer:Buffer.from(JSON.stringify(portable))});expect((await project(page)).overlays).toEqual(portable.overlays);
+  await page.setViewportSize({width:390,height:844});expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+});
+
+test('image transparency, opacity and stacking match real PNG and PDF export',async({page},info)=>{
+  await ready(page);await page.locator('#tab-page').click();await page.locator('#page-size').selectOption('short-mini');await page.locator('#paper-color').evaluate(el=>{el.value='#203050';el.dispatchEvent(new Event('change',{bubbles:true}));});
+  await page.locator('#tab-overlay').click();await overlayUpload(page);await overlayValue(page,'width',240);await overlayValue(page,'x',100);await overlayValue(page,'y',80);
+  const sample=()=>page.locator('#canvas').evaluate(c=>{const ctx=c.getContext('2d');return {outside:[...ctx.getImageData(110,90,1,1).data],inside:[...ctx.getImageData(220,140,1,1).data]};});
+  await expect.poll(async()=> (await sample()).inside).toEqual([224,32,48,255]);expect((await sample()).outside).toEqual([32,48,80,255]);
+  await overlayUpload(page,'#0044cc','青いマーク.png');await overlayValue(page,'width',240);await overlayValue(page,'x',100);await overlayValue(page,'y',80);await expect.poll(async()=> (await sample()).inside).toEqual([0,68,204,255]);
+  await page.locator('#overlay-backward').click();await expect.poll(async()=> (await sample()).inside).toEqual([224,32,48,255]);await page.locator('#overlay-forward').click();
+  await page.locator('#overlay-opacity').focus();await page.locator('#overlay-opacity').press('Home');await expect.poll(async()=> (await sample()).inside).toEqual([224,32,48,255]);await page.locator('#undo').click();await expect.poll(async()=> (await sample()).inside).toEqual([0,68,204,255]);
+  await page.locator('#export-button').click();let event=page.waitForEvent('download');await page.locator('#confirm-export').click();let file=await event;await file.saveAs(info.outputPath('overlay.png'));
+  const png=await fs.readFile(await file.path());const pixels=await page.evaluate(async data=>{const img=new Image();img.src='data:image/png;base64,'+data;await img.decode();const c=document.createElement('canvas');c.width=img.width;c.height=img.height;const ctx=c.getContext('2d');ctx.drawImage(img,0,0);return {size:[c.width,c.height],outside:[...ctx.getImageData(110,90,1,1).data],inside:[...ctx.getImageData(220,140,1,1).data]};},png.toString('base64'));
+  expect(pixels).toEqual({size:[640,360],outside:[32,48,80,255],inside:[0,68,204,255]});
+  await page.locator('#export-format').selectOption('pdf');event=page.waitForEvent('download');await page.locator('#confirm-export').click();file=await event;await file.saveAs(info.outputPath('overlay.pdf'));
+  const pdf=(await fs.readFile(await file.path())).toString('latin1');expect(pdf).toContain('/Subtype /Image');
+});
+
+test('image layers preserve aspect on page changes and reject invalid projects without losing work',async({page})=>{
+  await ready(page);await page.locator('#tab-overlay').click();await overlayUpload(page);const original=await project(page);
+  await page.locator('#tab-page').click();await page.locator('[data-orientation=landscape]').click();await page.locator('#page-size').selectOption('short-mini');const mini=await project(page);expect(mini.overlays[0].width/mini.overlays[0].height).toBeCloseTo(2,8);
+  await page.locator('#project-file').setInputFiles({name:'mini.kasane',mimeType:'application/json',buffer:Buffer.from(JSON.stringify(mini))});expect((await project(page)).overlays).toEqual(mini.overlays);
+  const invalid=structuredClone(mini);invalid.overlays[0].src='https://example.com/test.png';await page.locator('#project-file').setInputFiles({name:'bad.kasane',mimeType:'application/json',buffer:Buffer.from(JSON.stringify(invalid))});await expect(page.locator('#toast')).toContainText('原稿を開けませんでした');expect((await project(page)).overlays).toEqual(mini.overlays);
+  delete original.overlays;await page.locator('#project-file').setInputFiles({name:'old.kasane',mimeType:'application/json',buffer:Buffer.from(JSON.stringify(original))});expect((await project(page)).overlays).toEqual([]);
+});
+
+test('image placement switches between front and back of text, including transparent areas',async({page})=>{
+  await ready(page);await page.locator('#text').fill('春夏');
+  const result=await page.evaluate(async()=>{
+    const {initialState,render}=await import('/src/render.js');
+    const state=initialState();state.text='春夏';state.style.size=70;state.textBox={x:35,y:40,width:140,height:100};
+    const source=document.createElement('canvas');source.width=100;source.height=100;source.getContext('2d').fillStyle='#0044cc';source.getContext('2d').fillRect(0,0,100,100);
+    const src=source.toDataURL(),img=new Image();img.src=src;await img.decode();const images=new Map([[src,img]]);
+    state.overlays=[{id:'a',name:'blue',src,x:30,y:30,width:100,height:100,opacity:100,placement:'back'}];
+    const canvas=document.createElement('canvas'),dark=()=>{const data=canvas.getContext('2d').getImageData(0,0,canvas.width,canvas.height).data;let count=0;for(let i=0;i<data.length;i+=4)if(data[i]<60&&data[i+1]<60&&data[i+2]<60)count++;return count;};
+    render(canvas,state,null,{overlayImages:images});const back=dark();state.overlays[0].placement='front';render(canvas,state,null,{overlayImages:images});return {back,front:dark()};
+  });
+  expect(result.back).toBeGreaterThan(100);expect(result.front).toBe(0);
+  await page.locator('#tab-overlay').click();await overlayUpload(page);await page.locator('#overlay-placement').selectOption('back');expect((await project(page)).overlays[0].placement).toBe('back');await page.locator('#undo').click();expect((await project(page)).overlays[0].placement).toBe('front');
+});
+
+test('image frames support iPad touch dragging and corner resizing',async({browser})=>{
+  const context=await browser.newContext({viewport:{width:820,height:1180},hasTouch:true,isMobile:true,deviceScaleFactor:1});const page=await context.newPage();await ready(page);await page.locator('#tab-overlay').click();await overlayUpload(page);
+  const before=await project(page),frame=await page.locator('.overlay-frame.selected').boundingBox(),cdp=await context.newCDPSession(page),cx=frame.x+frame.width/2,cy=frame.y+frame.height/2;
+  const touch=async(x,y,dx,dy)=>{await cdp.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x,y,id:0}]});await cdp.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{x:x+dx,y:y+dy,id:0}]});await cdp.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});};
+  await touch(cx,cy,20,25);const moved=await project(page);expect(moved.overlays[0].x).toBeGreaterThan(before.overlays[0].x);expect(moved.overlays[0].y).toBeGreaterThan(before.overlays[0].y);
+  const corner=await page.locator('.overlay-frame.selected [data-image-resize=se]').boundingBox();await touch(corner.x+corner.width/2,corner.y+corner.height/2,-25,-12);const resized=await project(page);expect(resized.overlays[0].width).toBeLessThan(moved.overlays[0].width);expect(resized.overlays[0].width/resized.overlays[0].height).toBeCloseTo(2,8);await context.close();
+});
+
+test('opening a draft without images clears every editor frame and undo restores all images',async({page})=>{
+  await ready(page);const empty=await project(page);await page.locator('#tab-overlay').click();await overlayUpload(page);await overlayUpload(page,'#0044cc','マーク2.png');await expect(page.locator('.overlay-frame')).toHaveCount(2);
+  await page.locator('#project-file').setInputFiles({name:'empty.kasane',mimeType:'application/json',buffer:Buffer.from(JSON.stringify(empty))});await expect(page.locator('.overlay-frame')).toHaveCount(0);await page.locator('#undo').click();await expect(page.locator('.overlay-frame')).toHaveCount(2);expect((await project(page)).overlays).toHaveLength(2);
+});

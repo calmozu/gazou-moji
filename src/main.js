@@ -1,3 +1,11 @@
+import '@fontsource/yomogi/400.css';
+import '@fontsource/yuji-syuku/400.css';
+import '@fontsource/hachi-maru-pop/400.css';
+import '@fontsource/dela-gothic-one/400.css';
+import '@fontsource/kaisei-decol/400.css';
+import '@fontsource/reggae-one/400.css';
+import '@fontsource/kaisei-decol/700.css';
+import { overlayPanel, createOverlayEditor } from './overlays.js';
 import '@fontsource/noto-sans-jp/400.css';
 import '@fontsource/noto-sans-jp/700.css';
 import '@fontsource/noto-serif-jp/400.css';
@@ -7,7 +15,7 @@ import '@fontsource/zen-maru-gothic/700.css';
 import '@fontsource/klee-one/400.css';
 import '@fontsource/klee-one/600.css';
 import './style.css';
-import { families, initialState, render, dimensions, textBounds, validateProject, pageFormats, pageFormat, pageScale, textLayers } from './render.js';
+import { families, familyLabels, imageBounds, initialState, render, dimensions, textBounds, validateProject, pageFormats, pageFormat, pageScale, textLayers } from './render.js';
 import { saveDraft, loadDraft } from './storage.js';
 import { pngWithDpi } from './png.js';
 
@@ -24,6 +32,7 @@ document.querySelector('#app').innerHTML = `
 <aside aria-label="編集パネル">
  <div class="tabs" role="tablist" aria-label="編集するもの">
   <button id="tab-text" role="tab" aria-selected="true" aria-controls="panel-text" data-tab="text">文字</button>
+  <button id="tab-overlay" role="tab" aria-selected="false" aria-controls="panel-overlay" data-tab="overlay" tabindex="-1">重ねる画像</button>
   <button id="tab-background" role="tab" aria-selected="false" aria-controls="panel-background" data-tab="background" tabindex="-1">背景</button>
   <button id="tab-page" role="tab" aria-selected="false" aria-controls="panel-page" data-tab="page" tabindex="-1">用紙</button>
  </div>
@@ -35,7 +44,7 @@ document.querySelector('#app').innerHTML = `
    <button id="delete-text-box" class="quiet box-delete" hidden>BOX2を削除</button>
    <label for="text" class="label" id="text-label">BOX1の本文</label><textarea id="text" maxlength="30000" placeholder="ここに文字を入力してください。&#10;&#10;写真にそっと、ことばを重ねて。" spellcheck="false"></textarea>
    <p id="selection-info">選択なし · 設定は文字全体に反映します</p>
-   <label class="field"><span class="label">フォント</span><select id="family"><option value="sans">角ゴシック</option><option value="serif">明朝</option><option value="round">丸ゴシック</option><option value="textbook">教科書風</option></select></label>
+   <label class="field"><span class="label">フォント</span><select id="family">${Object.entries(familyLabels).map(([key,label])=>`<option value="${key}">${label}</option>`).join('')}</select></label>
    <label class="label" for="size">文字サイズ</label><div class="size-buttons"><button id="smaller">小さく −</button><button id="larger">大きく ＋</button></div>
    <div class="row"><div class="number-unit"><input id="size" type="number" min="6" max="200" step="1" aria-label="文字サイズ"><span id="font-size-unit">pt</span></div><button id="bold" aria-pressed="false"><b>B</b> 太字</button><input class="color-input" id="color" type="color" aria-label="文字の色"></div>
   </div>
@@ -60,6 +69,7 @@ document.querySelector('#app').innerHTML = `
    <p class="hint">文字を選ぶと、その部分だけ変更できます。光彩もPNG・PDFにそのまま残ります。</p>
   </div>
  </div>
+${overlayPanel}
  <div id="panel-background" class="panel" role="tabpanel" aria-labelledby="tab-background" hidden>
   <div class="section"><p class="eyebrow">BACKGROUND</p><h2>一枚の写真から。</h2>
    <img id="bg-thumb" class="bg-thumb" alt="選択した背景画像" hidden>
@@ -103,7 +113,9 @@ document.querySelector('#app').innerHTML = `
 <div class="toast" id="toast" role="status" hidden></div>`;
 
 let state=initialState(), image=null, tab='text', selection=[0,0], history=[], future=[], saveTimer, toastTimer, composing=false, overflow=false;
-let activeTextBox=0;
+let activeTextBox=0,overlayImages=new Map();
+const overlayEditor=createOverlayEditor({getState:()=>state,getImages:()=>overlayImages,getTab:()=>tab,remember,changed,toast,readDataURL,decodeImage,layoutFactor});
+async function prepareOverlays(next){return new Map(await Promise.all((next.overlays||[]).map(async item=>[item.src,overlayImages.get(item.src)||await decodeImage(item.src)])));}
 let fontReady=Promise.resolve(), fontKey='', drawing=0, hasBooted=false;
 const canvas=$('canvas'), text=$('text');
 function layer(){return activeTextBox===1 && state.secondTextBox ? state.secondTextBox : state;}
@@ -163,8 +175,8 @@ async function ensureFonts() {
 function scheduleDraw(){ cancelAnimationFrame(drawing); drawing=requestAnimationFrame(draw); }
 async function draw(){
   try { await ensureFonts(); } catch { toast('フォントを読み込めませんでした。通信を確認してください。'); }
-  const result=render(canvas,state,image,{dpi:pageFormat(state).pixels?300:120}); overflow=result.overflow;
-  $('overflow').hidden=!overflow;$('overflow').textContent=`${result.overflowingBoxes.map(n=>'BOX'+n).join('・')}の文字が枠に収まりません。枠を広げるか文字を小さくしてください。`;$('empty-note').hidden=textLayers(state).some(t=>!!t.text)||!!image;
+  const result=render(canvas,state,image,{dpi:pageFormat(state).pixels?300:120,overlayImages}); overflow=result.overflow;
+  $('overflow').hidden=!overflow;$('overflow').textContent=`${result.overflowingBoxes.map(n=>'BOX'+n).join('・')}の文字が枠に収まりません。枠を広げるか文字を小さくしてください。`;$('empty-note').hidden=textLayers(state).some(t=>!!t.text)||!!image||!!state.overlays?.length;
   $('char-count').textContent=`${textLayers(state).reduce((sum,t)=>sum+[...t.text].length,0).toLocaleString()} 文字`;
   fitPaper();
 }
@@ -213,7 +225,7 @@ function syncControls(){
     el.max=Math.floor((key==='x'?pageWidth-box.width:key==='y'?pageHeight-box.height:key==='width'?pageWidth-box.x:pageHeight-box.y)*factor);
   }
   $('text-box').hidden=tab!=='text'; fitPaper();
-  selectionInfo(); updateHistory();
+  overlayEditor.sync();selectionInfo(); updateHistory();
 }
 function applyStyle(patch) {
   remember(); const [a,b]=selection;
@@ -222,7 +234,7 @@ function applyStyle(patch) {
   changed();
   // Keep the logical selection while controls own focus; never insert an accidental newline.
 }
-function captureSelection(){ selection=[text.selectionStart,text.selectionEnd];syncControls(); }
+function captureSelection(){ const next=[text.selectionStart,text.selectionEnd];if(next[0]===selection[0]&&next[1]===selection[1])return;selection=next;syncControls(); }
 text.addEventListener('select',captureSelection);
 text.addEventListener('keyup',()=>{if(!composing)captureSelection();});
 text.addEventListener('pointerup',()=>setTimeout(captureSelection,0));
@@ -282,11 +294,12 @@ $('page-size').onchange=e=>updateValue(()=>{
   const [oldW,oldH]=dimensions(state),layers=textLayers(state),boxes=layers.map(t=>textBounds(editState(t)));state.pageSize=e.target.value;
   const [w,h]=dimensions(state),rx=w/oldW,ry=h/oldH;
   layers.forEach((t,i)=>{const b=boxes[i];t.textBox=textBounds({...state,textBox:{x:b.x*rx,y:b.y*ry,width:b.width*rx,height:b.height*ry}});});
+  for(const item of state.overlays||[])Object.assign(item,imageBounds(state,{...item,x:item.x*rx,y:item.y*ry,width:item.width*Math.min(rx,ry),height:item.height*Math.min(rx,ry)}));
   for(const key in state.margins)state.margins[key]=Math.min(70,state.margins[key]*(key==='left'||key==='right'?rx:ry));
   fitMargins();state.background.x=Math.max(-300,Math.min(300,state.background.x*rx));state.background.y=Math.max(-300,Math.min(300,state.background.y*ry));
 });
 document.querySelectorAll('[data-align]').forEach(b=>b.onclick=()=>updateValue(()=>layer().align=b.dataset.align));
-document.querySelectorAll('[data-orientation]').forEach(b=>b.onclick=()=>updateValue(()=>{state.orientation=b.dataset.orientation;for(const t of textLayers(state))t.textBox=textBounds(editState(t));}));
+document.querySelectorAll('[data-orientation]').forEach(b=>b.onclick=()=>updateValue(()=>{state.orientation=b.dataset.orientation;for(const t of textLayers(state))t.textBox=textBounds(editState(t));for(const item of state.overlays||[])Object.assign(item,imageBounds(state,item));}));
 document.querySelectorAll('[data-box]').forEach(el=>el.onchange=()=>{
   const value=Number(el.value)/layoutFactor();if(el.value===''||!Number.isFinite(value)){syncControls();return;}
   updateValue(()=>{const box=textBounds(editState());box[el.dataset.box]=value;layer().textBox=textBounds({...editState(),textBox:box});});
@@ -294,7 +307,7 @@ document.querySelectorAll('[data-box]').forEach(el=>el.onchange=()=>{
 $('compact-text-box').onclick=()=>updateValue(()=>{const box=textBounds(editState()),[w,h]=dimensions(state),video=!!pageFormat(state).pixels;layer().textBox=textBounds({...editState(),textBox:{...box,width:video?w*2/3:140,height:video?h/3:100}});});
 $('center-text-box').onclick=()=>updateValue(()=>{const [w,h]=dimensions(state),box=textBounds(editState());layer().textBox={...box,x:(w-box.width)/2,y:(h-box.height)/2};});
 function setTab(name){tab=name;document.querySelectorAll('[data-tab]').forEach(b=>{const active=b.dataset.tab===name;b.setAttribute('aria-selected',active);b.tabIndex=active?0:-1;$('panel-'+b.dataset.tab).hidden=!active;});syncControls();}
-document.querySelectorAll('[data-tab]').forEach(b=>{b.onclick=()=>setTab(b.dataset.tab);b.onkeydown=e=>{if(['ArrowLeft','ArrowRight','Home','End'].includes(e.key)){e.preventDefault();const tabs=['text','background','page'];let i=tabs.indexOf(tab);i=e.key==='Home'?0:e.key==='End'?2:(i+(e.key==='ArrowLeft'?-1:1)+3)%3;setTab(tabs[i]);$('tab-'+tabs[i]).focus();}};});
+document.querySelectorAll('[data-tab]').forEach(b=>{b.onclick=()=>setTab(b.dataset.tab);b.onkeydown=e=>{if(['ArrowLeft','ArrowRight','Home','End'].includes(e.key)){e.preventDefault();const tabs=['text','overlay','background','page'];let i=tabs.indexOf(tab);i=e.key==='Home'?0:e.key==='End'?tabs.length-1:(i+(e.key==='ArrowLeft'?-1:1)+tabs.length)%tabs.length;setTab(tabs[i]);$('tab-'+tabs[i]).focus();}};});
 function readDataURL(file){return new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.onerror=()=>reject(new Error('ファイルを読み込めませんでした。'));reader.readAsDataURL(file);});}
 function decodeImage(src){return new Promise((resolve,reject)=>{const img=new Image();img.onload=()=>resolve(img);img.onerror=()=>reject(new Error('画像を読み込めません。JPEG・PNG・WebPをお試しください。'));img.src=src;});}
 $('choose-image').onclick=()=>$('image-file').click();
@@ -314,7 +327,7 @@ $('image-file').onchange=async e=>{
   }catch(error){toast(error.message);}finally{$('choose-image').disabled=false;}
 };
 $('remove-image').onclick=()=>updateValue(()=>{image=null;state.background.src='';});
-async function restore(next){const restoredSecond=!state.secondTextBox&&!!next.secondTextBox;state=next;if(!state.secondTextBox)activeTextBox=0;else if(restoredSecond)activeTextBox=1;selection=[0,0];text.value=layer().text;image=state.background.src?await decodeImage(state.background.src):null;changed();}
+async function restore(next){const nextOverlays=await prepareOverlays(next),nextImage=next.background.src?await decodeImage(next.background.src):null;const restoredSecond=!state.secondTextBox&&!!next.secondTextBox;state=next;overlayImages=nextOverlays;if(!state.secondTextBox)activeTextBox=0;else if(restoredSecond)activeTextBox=1;selection=[0,0];text.value=layer().text;image=nextImage;changed();}
 async function undo(){if(!history.length)return;future.push(JSON.stringify(state));await restore(JSON.parse(history.pop()));}
 async function redo(){if(!future.length)return;history.push(JSON.stringify(state));await restore(JSON.parse(future.pop()));}
 $('undo').onclick=undo;$('redo').onclick=redo;
@@ -336,8 +349,8 @@ $('save-project').onclick=saveProject;
 $('open-project').onclick=()=>$('project-file').click();
 $('project-file').onchange=async e=>{
   const file=e.target.files[0];e.target.value='';if(!file)return;
-  if(file.size>50000000){toast('原稿ファイルが大きすぎます。');return;}
-  try{const next=validateProject(JSON.parse(await file.text()));const nextImage=next.background.src?await decodeImage(next.background.src):null;remember();state=next;activeTextBox=0;image=nextImage;text.value=layer().text;selection=[0,0];changed();toast('原稿を開きました。');}catch{toast('原稿を開けませんでした。「かさね」で保存した原稿ファイルを選んでください。');}
+  if(file.size>65000000){toast('原稿ファイルが大きすぎます。');return;}
+  try{const next=validateProject(JSON.parse(await file.text()));const nextImage=next.background.src?await decodeImage(next.background.src):null;const nextOverlays=await prepareOverlays(next);remember();state=next;overlayImages=nextOverlays;activeTextBox=0;image=nextImage;text.value=layer().text;selection=[0,0];changed();toast('原稿を開きました。');}catch{toast('原稿を開けませんでした。「かさね」で保存した原稿ファイルを選んでください。');}
 };
 $('new-document').onclick=()=>$('new-dialog').showModal();$('cancel-new').onclick=()=>$('new-dialog').close();
 $('confirm-new').onclick=()=>{remember();restore(initialState());$('new-dialog').close();};
@@ -345,13 +358,13 @@ function toggleFullscreen(){document.body.classList.toggle('fullscreen');$('full
 $('fullscreen').onclick=toggleFullscreen;
 let exportCanvas=null;
 async function openExport(){
-  try{await ensureFonts(); exportCanvas=document.createElement('canvas');const result=render(exportCanvas,state,image,{dpi:pageFormat(state).pixels?300:150});$('export-warning').hidden=!result.overflow;$('export-preview').src=exportCanvas.toDataURL('image/png');$('export-dialog').showModal();}catch{toast('プレビューを作れませんでした。画像のサイズを小さくしてお試しください。');}
+  try{await ensureFonts(); exportCanvas=document.createElement('canvas');const result=render(exportCanvas,state,image,{dpi:pageFormat(state).pixels?300:150,overlayImages});$('export-warning').hidden=!result.overflow;$('export-preview').src=exportCanvas.toDataURL('image/png');$('export-dialog').showModal();}catch{toast('プレビューを作れませんでした。画像のサイズを小さくしてお試しください。');}
 }
 $('export-button').onclick=openExport;$('preview-button').onclick=openExport;$('close-export').onclick=()=>$('export-dialog').close();
 $('confirm-export').onclick=async()=>{
   document.body.classList.add('busy');$('confirm-export').disabled=true;
   try{
-    await ensureFonts();const output=document.createElement('canvas');render(output,state,image,{dpi:300});
+    await ensureFonts();const output=document.createElement('canvas');render(output,state,image,{dpi:300,overlayImages});
     if($('export-format').value==='pdf'){
       const {jsPDF}=await import('jspdf');const [w,h]=dimensions(state).map(n=>n*pageScale(state));const pdf=new jsPDF({orientation:w>h?'landscape':'portrait',unit:'mm',format:pageFormat(state).pixels?[w,h]:'a4',compress:true});
       pdf.addImage(output.toDataURL('image/png'),'PNG',0,0,w,h,undefined,'FAST');pdf.setProperties({title:state.title,creator:'かさね'});download(pdf.output('blob'),filename()+'.pdf');
@@ -427,7 +440,7 @@ for(const event of ['pointerup','pointercancel','lostpointercapture'])canvas.add
 new ResizeObserver(()=>fitPaper()).observe($('canvas-scroll'));
 window.addEventListener('pagehide',()=>{if(hasBooted)saveDraft(state).catch(()=>{});});
 async function boot(){
-  try{const saved=await loadDraft();if(saved){state=validateProject(saved);image=state.background.src?await decodeImage(state.background.src):null;text.value=layer().text;}}catch{toast('前回の原稿を復元できませんでした。保存した原稿ファイルから開けます。');}
+  try{const saved=await loadDraft();if(saved){const next=validateProject(saved);const nextOverlays=await prepareOverlays(next);const nextImage=next.background.src?await decodeImage(next.background.src):null;state=next;overlayImages=nextOverlays;image=nextImage;text.value=layer().text;}}catch{toast('前回の原稿を復元できませんでした。保存した原稿ファイルから開けます。');}
   hasBooted=true;syncControls();await draw();document.documentElement.dataset.ready='true';
 }
 boot();

@@ -3,7 +3,14 @@ export const families = {
   serif: '"Noto Serif JP", serif',
   round: '"Zen Maru Gothic", sans-serif',
   textbook: '"Klee One", serif',
+  handwriting: '"Yomogi", cursive',
+  brush: '"Yuji Syuku", serif',
+  pop: '"Hachi Maru Pop", cursive',
+  heavy: '"Dela Gothic One", sans-serif',
+  decorative: '"Kaisei Decol", serif',
+  reggae: '"Reggae One", sans-serif',
 };
+export const familyLabels={sans:'角ゴシック',serif:'明朝',round:'丸ゴシック',textbook:'教科書風',handwriting:'手書き（よもぎ）',brush:'筆文字（佑字）',pop:'ポップ（はちまる）',heavy:'極太ゴシック',decorative:'飾り明朝',reggae:'個性派（レゲエ）'};
 export const baseStyle = { family: 'sans', size: 24, bold: false, color: '#252923', glow: false, glowColor: '#ffffff', glowSize: 1.5 };
 export const pageFormats={
   a4: {label:'A4'},
@@ -24,8 +31,14 @@ export function textBounds(state) {
   const width=Math.max(20,Math.min(w,b.width)), height=Math.max(20,Math.min(h,b.height));
   return {x:Math.max(0,Math.min(w-width,b.x)),y:Math.max(0,Math.min(h-height,b.y)),width,height};
 }
+// Keep image proportions while fitting the entire layer inside the page.
+export function imageBounds(state, item) {
+  const [w,h]=dimensions(state),ratio=item.width/item.height;
+  const maxWidth=Math.min(w,h*ratio),width=Math.min(maxWidth,Math.max(.1,.1*ratio,Math.min(item.width,maxWidth))),height=width/ratio;
+  return {x:Math.max(0,Math.min(w-width,item.x)),y:Math.max(0,Math.min(h-height,item.y)),width,height};
+}
 export function initialState() {
-  return { version: 1, title: '無題のかさね', text: '', styles: [], style: { ...baseStyle }, pageSize:'a4', pageLayoutVersion:2, orientation: 'portrait', vertical: false, align: 'left', lineHeight: 1.65, letterSpacing:0, secondTextBox:null,
+  return { version: 1, title: '無題のかさね', text: '', styles: [], style: { ...baseStyle }, pageSize:'a4', pageLayoutVersion:2, orientation: 'portrait', vertical: false, align: 'left', lineHeight: 1.65, letterSpacing:0, secondTextBox:null, overlays:[],
     margins: { top: 20, right: 20, bottom: 20, left: 20 }, textBox: {x:35,y:40,width:140,height:100}, paper: '#ffffff',
     background: { src: '', fit: 'cover', opacity: 100, zoom: 1, x: 0, y: 0 } };
 }
@@ -43,7 +56,7 @@ function font(ctx, style) {
 }
 const noStart = /^[、。，．？！：；）」』】〕〉》ーぁぃぅぇぉっゃゅょァィゥェォッャュョ]$/u;
 const segmenter = new Intl.Segmenter('ja', { granularity: 'grapheme' });
-export function render(canvas, state, image, { dpi = 120 } = {}) {
+export function render(canvas, state, image, { dpi = 120, overlayImages = new Map() } = {}) {
   const [w,h] = dimensions(state), scale = dpi/25.4*pageScale(state);
   canvas.width = Math.round(w*scale); canvas.height = Math.round(h*scale);
   const ctx = canvas.getContext('2d'); ctx.scale(scale,scale);
@@ -52,7 +65,17 @@ export function render(canvas, state, image, { dpi = 120 } = {}) {
     const r = backgroundRect(state,image);
     ctx.save(); ctx.globalAlpha = state.background.opacity/100; ctx.drawImage(image,r.x,r.y,r.w,r.h); ctx.restore();
   }
+  function drawImages(placement){
+    for(const item of state.overlays || []){
+      if(item.placement!==placement)continue;
+      const img=overlayImages.get(item.src);if(!img)continue;
+      const b=imageBounds(state,item);ctx.save();ctx.globalAlpha=item.opacity/100;
+      ctx.drawImage(img,b.x,b.y,b.width,b.height);ctx.restore();
+    }
+  }
+  drawImages('back');
   const results=textLayers(state).map(layer=>drawText(ctx,{...state,...layer},scale));
+  drawImages('front');
   return {overflow:results.some(r=>r.overflow),lines:results.reduce((sum,r)=>sum+r.lines,0),glyphs:results.reduce((sum,r)=>sum+r.glyphs,0),overflowingBoxes:results.flatMap((r,i)=>r.overflow?[i+1]:[])};
 }
 function drawText(ctx,state,scale) {
@@ -121,6 +144,15 @@ export function validateProject(value) {
     const r=t.textBox,[w,h]=legacyMini?dimensions({...s,pageSize:'short'}):dimensions(s);
     if (!num(r.x,0,w)||!num(r.y,0,h)||!num(r.width,20,w)||!num(r.height,20,h)||r.x+r.width>w+.0001||r.y+r.height>h+.0001) throw new Error('2つ目の文字枠の位置や大きさを読み込めません。');
   }
+  if(s.overlays!=null){
+    if(!Array.isArray(s.overlays)||s.overlays.length>12)throw new Error('重ねる画像を読み込めません。');
+    const ids=new Set(),[w,h]=dimensions(s);let total=0;
+    for(const item of s.overlays){
+      if(!item||typeof item.id!=='string'||item.id.length>80||ids.has(item.id)||typeof item.name!=='string'||item.name.length>150||typeof item.src!=='string'||item.src.length>12000000||!/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(item.src)||!num(item.opacity,0,100)||!['front','back'].includes(item.placement)||!num(item.x,0,w)||!num(item.y,0,h)||!num(item.width,.1,w)||!num(item.height,.1,h)||item.x+item.width>w+.0001||item.y+item.height>h+.0001)throw new Error('重ねる画像の設定を読み込めません。');
+      ids.add(item.id);total+=item.src.length;
+    }
+    if(total>30000000)throw new Error('重ねる画像の合計サイズが大きすぎます。');
+  }
   const b=s.background;
   if (!b || typeof b.src!=='string' || b.src.length>25000000 || (b.src && !/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(b.src)) || !['cover','contain','width','height'].includes(b.fit) || !num(b.opacity,0,100) || !num(b.zoom,1,5) || !num(b.x,-1000,1000) || !num(b.y,-1000,1000)) throw new Error('背景画像の設定を読み込めません。');
   const copy=structuredClone(s);
@@ -141,6 +173,7 @@ export function validateProject(value) {
     copy.background.x=Math.max(-300,Math.min(300,copy.background.x*rx));
     copy.background.y=Math.max(-300,Math.min(300,copy.background.y*ry));
   }
+  copy.overlays ||= [];
   copy.pageLayoutVersion=2;
   return copy;
 }
