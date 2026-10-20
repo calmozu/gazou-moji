@@ -29,7 +29,9 @@ document.querySelector('#app').innerHTML = `
  </div>
  <div id="panel-text" class="panel" role="tabpanel" aria-labelledby="tab-text">
   <div class="section"><p class="eyebrow">WORDS</p><h2>重ねたい、ことば。</h2>
-   <div class="segmented box-selector" role="group" aria-label="編集する文字ボックス"><button id="select-box-1" class="active" aria-pressed="true">BOX1</button><button id="select-box-2" aria-pressed="false" hidden>BOX2</button><button id="add-text-box">＋ BOX2を追加</button></div>
+   <div class="segmented box-selector" role="group" aria-label="編集する文字ボックス"><button id="select-box-1" class="active" aria-pressed="true">BOX1</button><button id="select-box-2" aria-pressed="false" hidden>BOX2</button></div>
+   <div id="box-create-actions" class="row box-actions"><button id="add-text-box">空のBOX2を追加</button><button id="copy-text-box">BOX1をコピー</button></div>
+   <button id="delete-text-box" class="quiet box-delete" hidden>BOX2を削除</button>
    <label for="text" class="label" id="text-label">BOX1の本文</label><textarea id="text" maxlength="30000" placeholder="ここに文字を入力してください。&#10;&#10;写真にそっと、ことばを重ねて。" spellcheck="false"></textarea>
    <p id="selection-info">選択なし · 設定は文字全体に反映します</p>
    <label class="field"><span class="label">フォント</span><select id="family"><option value="sans">角ゴシック</option><option value="serif">明朝</option><option value="round">丸ゴシック</option><option value="textbook">教科書風</option></select></label>
@@ -110,12 +112,18 @@ function chooseLayer(index){
   activeTextBox=index;selection=[0,0];text.value=layer().text;text.setSelectionRange(0,0);syncControls();scheduleDraw();
 }
 $('select-box-1').onclick=()=>chooseLayer(0);$('select-box-2').onclick=()=>chooseLayer(1);
-$('add-text-box').onclick=()=>{
+function createSecondBox(copyFirst=false){
   if(state.secondTextBox)return;
-  remember();const t=layer(),b=textBounds(editState()),[w,h]=dimensions(state);
-  const width=Math.min(b.width,w*2/3),height=Math.min(b.height,h/3),y=b.y+b.height+5;
-  state.secondTextBox={text:'',styles:[],style:{...t.style},vertical:t.vertical,align:t.align,lineHeight:t.lineHeight,letterSpacing:t.letterSpacing||0,textBox:{x:Math.max(0,Math.min(w-width,b.x)),y:y+height<=h?y:Math.max(0,Math.min(h-height,b.y+10)),width,height}};
+  remember();const t=state,b=textBounds(state),[w,h]=dimensions(state);
+  const width=copyFirst?b.width:Math.min(b.width,w*2/3),height=copyFirst?b.height:Math.min(b.height,h/3),y=b.y+b.height+5;
+  state.secondTextBox=structuredClone({text:copyFirst?t.text:'',styles:copyFirst?t.styles:[],style:t.style,vertical:t.vertical,align:t.align,lineHeight:t.lineHeight,letterSpacing:t.letterSpacing||0,textBox:{x:Math.max(0,Math.min(w-width,b.x)),y:y+height<=h?y:Math.max(0,Math.min(h-height,b.y+10)),width,height}});
   chooseLayer(1);changed();text.focus();
+}
+$('add-text-box').onclick=()=>createSecondBox();
+$('copy-text-box').onclick=()=>createSecondBox(true);
+$('delete-text-box').onclick=()=>{
+  if(!state.secondTextBox)return;
+  remember();state.secondTextBox=null;chooseLayer(0);changed();$('select-box-1').focus({preventScroll:true});toast('BOX2を削除しました。「元に戻す」で復元できます。');
 };
 
 function toast(message) { $('toast').textContent=message; $('toast').hidden=false; clearTimeout(toastTimer); toastTimer=setTimeout(()=>$('toast').hidden=true,5000); }
@@ -157,6 +165,7 @@ function selectionInfo(){ const [a,b]=selection; $('selection-info').textContent
 function syncControls(){
   if(activeTextBox===1&&!state.secondTextBox)activeTextBox=0;
   $('select-box-2').hidden=!(state.secondTextBox);$('add-text-box').hidden=!!state.secondTextBox;
+  $('box-create-actions').hidden=!!state.secondTextBox;$('delete-text-box').hidden=!state.secondTextBox||activeTextBox!==1;
   for(const i of [0,1]){$('select-box-'+(i+1)).classList.toggle('active',activeTextBox===i);$('select-box-'+(i+1)).setAttribute('aria-pressed',activeTextBox===i);}
   $('text-label').textContent=`BOX${activeTextBox+1}の本文`;
   $('letter-spacing').value=layer().letterSpacing||0;$('letter-spacing-value').value=`${Math.round((layer().letterSpacing||0)*100)}%`;
@@ -296,7 +305,7 @@ $('image-file').onchange=async e=>{
   }catch(error){toast(error.message);}finally{$('choose-image').disabled=false;}
 };
 $('remove-image').onclick=()=>updateValue(()=>{image=null;state.background.src='';});
-async function restore(next){state=next;if(!state.secondTextBox)activeTextBox=0;selection=[0,0];text.value=layer().text;image=state.background.src?await decodeImage(state.background.src):null;changed();}
+async function restore(next){const restoredSecond=!state.secondTextBox&&!!next.secondTextBox;state=next;if(!state.secondTextBox)activeTextBox=0;else if(restoredSecond)activeTextBox=1;selection=[0,0];text.value=layer().text;image=state.background.src?await decodeImage(state.background.src):null;changed();}
 async function undo(){if(!history.length)return;future.push(JSON.stringify(state));await restore(JSON.parse(history.pop()));}
 async function redo(){if(!future.length)return;history.push(JSON.stringify(state));await restore(JSON.parse(future.pop()));}
 $('undo').onclick=undo;$('redo').onclick=redo;
