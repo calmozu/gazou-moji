@@ -1,3 +1,4 @@
+import { paperPanel, paperFillDefaults, paintPaper } from './paper-fill.js';
 import { effectDefaults, textEffectPresets, effectPanel, effectInputs } from './text-effects.js';
 import { colorPresets, presetCSS } from './presets.js';
 import '@fontsource/yomogi/400.css';
@@ -77,6 +78,7 @@ ${effectPanel}
  </div>
 ${overlayPanel}
  <div id="panel-background" class="panel" role="tabpanel" aria-labelledby="tab-background" hidden>
+${paperPanel}
   <div class="section"><p class="eyebrow">BACKGROUND</p><h2>一枚の写真から。</h2>
    <img id="bg-thumb" class="bg-thumb" alt="選択した背景画像" hidden>
    <button class="upload" id="choose-image"><span aria-hidden="true">＋</span><span>ライブラリから画像を選ぶ</span></button>
@@ -97,7 +99,7 @@ ${overlayPanel}
   <div class="section"><p class="eyebrow">PAPER</p><h2>余白を、整える。<span class="badge" id="page-badge">A4</span></h2>
    <label class="field"><span class="label">サイズ</span><select id="page-size">${Object.entries(pageFormats).map(([key,format])=>`<option value="${key}">${format.label}${format.pixels?` · ${format.pixels.join(' × ')} px`:''}</option>`).join('')}</select></label>
    <div id="page-orientation" class="segmented" role="group" aria-label="用紙の向き"><button data-orientation="portrait" class="active">▯ 縦</button><button data-orientation="landscape">▭ 横</button></div>
-   <div class="row" style="margin-top:16px"><label class="label" for="paper-color">用紙の色</label><input id="paper-color" class="color-input" type="color" value="#ffffff"></div>
+   <div class="row" style="margin-top:16px"><label class="label" for="paper-color">用紙の色（単色）</label><input id="paper-color" class="color-input" type="color" value="#ffffff"></div>
   </div>
   <div class="section"><h2>文字範囲の余白 <span id="margin-unit-hint">mm / 20 mm = 2 cm</span></h2><div class="margin-grid">
    ${[['top','上'],['bottom','下'],['left','左'],['right','右']].map(([key,label])=>`<label class="field"><span class="label">${label}</span><div class="number-unit"><input id="margin-${key}" data-margin="${key}" type="number" min="0" max="70" value="20"><span data-layout-unit>mm</span></div></label>`).join('')}
@@ -119,7 +121,7 @@ ${overlayPanel}
 <div class="toast" id="toast" role="status" hidden></div>`;
 
 let state=initialState(), image=null, tab='text', selection=[0,0], history=[], future=[], saveTimer, toastTimer, composing=false, overflow=false;
-let activeTextBox=0,overlayImages=new Map();
+let activeTextBox=0,overlayImages=new Map(),paperPreviewKey='';
 const overlayEditor=createOverlayEditor({getState:()=>state,getImages:()=>overlayImages,getTab:()=>tab,remember,changed,toast,readDataURL,decodeImage,layoutFactor,onAdded:()=>setTab('overlay')});
 async function prepareOverlays(next){return new Map(await Promise.all((next.overlays||[]).map(async item=>[item.src,overlayImages.get(item.src)||await decodeImage(item.src)])));}
 let fontReady=Promise.resolve(), fontKey='', drawing=0, hasBooted=false;
@@ -182,7 +184,7 @@ function scheduleDraw(){ cancelAnimationFrame(drawing); drawing=requestAnimation
 async function draw(){
   try { await ensureFonts(); } catch { toast('フォントを読み込めませんでした。通信を確認してください。'); }
   const result=render(canvas,state,image,{dpi:pageFormat(state).pixels?300:120,overlayImages}); overflow=result.overflow;
-  $('overflow').hidden=!overflow;$('overflow').textContent=`${result.overflowingBoxes.map(n=>'BOX'+n).join('・')}の文字が枠に収まりません。枠を広げるか文字を小さくしてください。`;$('empty-note').hidden=textLayers(state).some(t=>!!t.text)||!!image||!!state.overlays?.length;
+  $('overflow').hidden=!overflow;$('overflow').textContent=`${result.overflowingBoxes.map(n=>'BOX'+n).join('・')}の文字が枠に収まりません。枠を広げるか文字を小さくしてください。`;$('empty-note').hidden=textLayers(state).some(t=>!!t.text)||!!image||!!state.overlays?.length||state.paper!=='#ffffff'||state.paperFill?.mode==='gradient';
   $('char-count').textContent=`${textLayers(state).reduce((sum,t)=>sum+[...t.text].length,0).toLocaleString()} 文字`;
   fitPaper();
 }
@@ -202,6 +204,11 @@ function syncControls(){
   const s=activeStyle();
   for(const [id,v] of Object.entries({family:s.family,size:s.size,color:s.color,'glow-color':s.glowColor,'glow-size':s.glowSize,fit:state.background.fit,opacity:state.background.opacity,zoom:state.background.zoom,'image-x':state.background.x,'image-y':state.background.y,'line-height':layer().lineHeight,'paper-color':state.paper,title:state.title})) $(id).value=v;
   for(const [id,key] of Object.entries(effectInputs)){const el=$(id);if(el.type==='checkbox')el.checked=s[key];else el.value=s[key];if($(id+'-value'))$(id+'-value').value=`${s[key]} mm`;}
+  const fill={...paperFillDefaults,...state.paperFill};
+  document.querySelectorAll('[data-paper-mode]').forEach(button=>{const active=button.dataset.paperMode===fill.mode;button.classList.toggle('active',active);button.setAttribute('aria-pressed',active);});
+  $('paper-solid-controls').hidden=fill.mode!=='solid';$('paper-gradient-controls').hidden=fill.mode!=='gradient';$('background-color').value=state.paper;$('paper-palette').value=fill.preset;$('paper-pattern').value=fill.pattern;$('paper-reverse').checked=fill.reverse;
+  document.querySelectorAll('[data-paper-color]').forEach(button=>button.setAttribute('aria-pressed',fill.mode==='solid'&&button.dataset.paperColor===state.paper));
+  const previewKey=JSON.stringify([state.paper,fill]);if(previewKey!==paperPreviewKey){paperPreviewKey=previewKey;const preview=document.createElement('canvas');preview.width=256;preview.height=128;paintPaper(preview.getContext('2d'),state,256,128);$('paper-fill-preview').src=preview.toDataURL();}
   $('fill-preset').value=s.fillPreset||'solid';
   $('preset-preview').hidden=!Object.hasOwn(colorPresets,s.fillPreset||'');$('preset-preview').firstElementChild.style.backgroundImage=presetCSS(s.fillPreset);
   $('bold').setAttribute('aria-pressed',s.bold); $('bold').classList.toggle('active',s.bold); $('bold').style.background=s.bold?'#e4eddf':'';
@@ -290,7 +297,12 @@ function updateValue(fn){remember();fn();changed();}
 $('vertical').onchange=e=>updateValue(()=>layer().vertical=e.target.checked);
 $('tighten-spacing').onclick=()=>updateValue(()=>layer().letterSpacing=Math.max(-.5,Math.round(((layer().letterSpacing||0)-.05)*100)/100));
 $('reset-spacing').onclick=()=>updateValue(()=>layer().letterSpacing=0);
-$('paper-color').onchange=e=>updateValue(()=>state.paper=e.target.value);
+function setPaperFill(patch){updateValue(()=>state.paperFill={...paperFillDefaults,...state.paperFill,...patch});}
+function setPaperColor(color){updateValue(()=>{state.paper=color;state.paperFill={...paperFillDefaults,...state.paperFill,mode:'solid'};});}
+$('paper-color').onchange=e=>setPaperColor(e.target.value);$('background-color').onchange=e=>setPaperColor(e.target.value);
+document.querySelectorAll('[data-paper-mode]').forEach(button=>button.onclick=()=>setPaperFill({mode:button.dataset.paperMode}));
+document.querySelectorAll('[data-paper-color]').forEach(button=>button.onclick=()=>setPaperColor(button.dataset.paperColor));
+$('paper-palette').onchange=e=>setPaperFill({preset:e.target.value});$('paper-pattern').onchange=e=>setPaperFill({pattern:e.target.value});$('paper-reverse').onchange=e=>setPaperFill({reverse:e.target.checked});
 $('title').onchange=e=>updateValue(()=>state.title=e.target.value.trim()||'無題のかさね');
 $('show-guides').onchange=e=>$('guides').hidden=!e.target.checked;
 for(const id of ['line-height','letter-spacing','opacity','zoom','image-x','image-y']) {
@@ -326,7 +338,7 @@ document.querySelectorAll('[data-box]').forEach(el=>el.onchange=()=>{
 });
 $('compact-text-box').onclick=()=>updateValue(()=>{const box=textBounds(editState()),[w,h]=dimensions(state),video=!!pageFormat(state).pixels;layer().textBox=textBounds({...editState(),textBox:{...box,width:video?w*2/3:140,height:video?h/3:100}});});
 $('center-text-box').onclick=()=>updateValue(()=>{const [w,h]=dimensions(state),box=textBounds(editState());layer().textBox={...box,x:(w-box.width)/2,y:(h-box.height)/2};});
-function setTab(name){tab=name;document.querySelectorAll('[data-tab]').forEach(b=>{const active=b.dataset.tab===name;b.setAttribute('aria-selected',active);b.tabIndex=active?0:-1;$('panel-'+b.dataset.tab).hidden=!active;});syncControls();}
+function setTab(name){const switched=tab!==name;tab=name;document.querySelectorAll('[data-tab]').forEach(b=>{const active=b.dataset.tab===name;b.setAttribute('aria-selected',active);b.tabIndex=active?0:-1;$('panel-'+b.dataset.tab).hidden=!active;});syncControls();if(switched)document.querySelector('aside').scrollTop=0;}
 document.querySelectorAll('[data-tab]').forEach(b=>{b.onclick=()=>setTab(b.dataset.tab);b.onkeydown=e=>{if(['ArrowLeft','ArrowRight','Home','End'].includes(e.key)){e.preventDefault();const tabs=['text','overlay','background','page'];let i=tabs.indexOf(tab);i=e.key==='Home'?0:e.key==='End'?tabs.length-1:(i+(e.key==='ArrowLeft'?-1:1)+tabs.length)%tabs.length;setTab(tabs[i]);$('tab-'+tabs[i]).focus();}};});
 function readDataURL(file){return new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.onerror=()=>reject(new Error('ファイルを読み込めませんでした。'));reader.readAsDataURL(file);});}
 function decodeImage(src){return new Promise((resolve,reject)=>{const img=new Image();img.onload=()=>resolve(img);img.onerror=()=>reject(new Error('画像を読み込めません。JPEG・PNG・WebPをお試しください。'));img.src=src;});}

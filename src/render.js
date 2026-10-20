@@ -1,3 +1,4 @@
+import { paperFillDefaults, paintPaper, validPaperFill } from './paper-fill.js';
 import { effectDefaults } from './text-effects.js';
 import { colorPresets, presetGradient } from './presets.js';
 export const families = {
@@ -41,7 +42,7 @@ export function imageBounds(state, item) {
 }
 export function initialState() {
   return { version: 1, title: '無題のかさね', text: '', styles: [], style: { ...baseStyle }, pageSize:'a4', pageLayoutVersion:2, orientation: 'portrait', vertical: false, align: 'left', lineHeight: 1.65, letterSpacing:0, secondTextBox:null, overlays:[],
-    margins: { top: 20, right: 20, bottom: 20, left: 20 }, textBox: {x:35,y:40,width:140,height:100}, paper: '#ffffff',
+    margins: { top: 20, right: 20, bottom: 20, left: 20 }, textBox: {x:35,y:40,width:140,height:100}, paper: '#ffffff', paperFill:{...paperFillDefaults},
     background: { src: '', fit: 'cover', opacity: 100, zoom: 1, x: 0, y: 0 } };
 }
 export function backgroundRect(state, image) {
@@ -62,7 +63,7 @@ export function render(canvas, state, image, { dpi = 120, overlayImages = new Ma
   const [w,h] = dimensions(state), scale = dpi/25.4*pageScale(state);
   canvas.width = Math.round(w*scale); canvas.height = Math.round(h*scale);
   const ctx = canvas.getContext('2d'); ctx.scale(scale,scale);
-  ctx.fillStyle = state.paper; ctx.fillRect(0,0,w,h);
+  paintPaper(ctx,state,w,h);
   if (image) {
     const r = backgroundRect(state,image);
     ctx.save(); ctx.globalAlpha = state.background.opacity/100; ctx.drawImage(image,r.x,r.y,r.w,r.h); ctx.restore();
@@ -146,6 +147,7 @@ export function validateProject(value) {
   if (s.letterSpacing!=null && !num(s.letterSpacing,-.5,.5)) throw new Error('文字間隔を読み込めません。');
   if (s.pageSize!=null && !Object.hasOwn(pageFormats,s.pageSize)) throw new Error('対応していない用紙サイズです。');
   if (s.pageLayoutVersion!=null && s.pageLayoutVersion!==2) throw new Error('対応していない用紙の設定です。');
+  if(s.paperFill!=null&&!validPaperFill(s.paperFill))throw new Error('背景の色やパターンを読み込めません。');
   const legacyMini=s.pageSize==='short-mini' && s.pageLayoutVersion==null;
   if (s.textBox!=null) {
     const t=s.textBox,[w,h]=legacyMini?dimensions({...s,pageSize:'short'}):dimensions(s);
