@@ -1,0 +1,289 @@
+import '@fontsource/noto-sans-jp/400.css';
+import '@fontsource/noto-sans-jp/700.css';
+import '@fontsource/noto-serif-jp/400.css';
+import '@fontsource/noto-serif-jp/700.css';
+import '@fontsource/zen-maru-gothic/400.css';
+import '@fontsource/zen-maru-gothic/700.css';
+import '@fontsource/klee-one/400.css';
+import '@fontsource/klee-one/600.css';
+import './style.css';
+import { families, initialState, render, dimensions, validateProject } from './render.js';
+import { saveDraft, loadDraft } from './storage.js';
+import { pngWithDpi } from './png.js';
+
+const $ = id => document.getElementById(id);
+document.querySelector('#app').innerHTML = `
+<header>
+  <div class="brand"><span class="mark" aria-hidden="true"><i></i><i></i><i></i></span><div><strong>かさね</strong><small>写真に、ことばを。</small></div></div>
+  <nav class="actions" aria-label="原稿と書き出し">
+    <button id="open-project" class="quiet">開く</button><button id="save-project" class="quiet">原稿<span class="long-label">を保存</span></button>
+    <button id="preview-button">プレビュー</button><button id="export-button" class="primary">書き出す <span aria-hidden="true">↗</span></button>
+  </nav>
+</header>
+<div class="workspace">
+<aside aria-label="編集パネル">
+ <div class="tabs" role="tablist" aria-label="編集するもの">
+  <button id="tab-text" role="tab" aria-selected="true" aria-controls="panel-text" data-tab="text">文字</button>
+  <button id="tab-background" role="tab" aria-selected="false" aria-controls="panel-background" data-tab="background" tabindex="-1">背景</button>
+  <button id="tab-page" role="tab" aria-selected="false" aria-controls="panel-page" data-tab="page" tabindex="-1">用紙</button>
+ </div>
+ <div id="panel-text" class="panel" role="tabpanel" aria-labelledby="tab-text">
+  <div class="section"><p class="eyebrow">WORDS</p><h2>重ねたい、ことば。</h2>
+   <label for="text" class="label">本文</label><textarea id="text" maxlength="30000" placeholder="ここに文字を入力してください。&#10;&#10;写真にそっと、ことばを重ねて。" spellcheck="false"></textarea>
+   <p id="selection-info">選択なし · 設定は文字全体に反映します</p>
+   <label class="field"><span class="label">フォント</span><select id="family"><option value="sans">角ゴシック</option><option value="serif">明朝</option><option value="round">丸ゴシック</option><option value="textbook">教科書風</option></select></label>
+   <label class="label" for="size">文字サイズ</label><div class="size-buttons"><button id="smaller">小さく −</button><button id="larger">大きく ＋</button></div>
+   <div class="row"><div class="number-unit"><input id="size" type="number" min="6" max="200" step="1" aria-label="文字サイズ"><span>pt</span></div><button id="bold" aria-pressed="false"><b>B</b> 太字</button><input class="color-input" id="color" type="color" aria-label="文字の色"></div>
+  </div>
+  <div class="section"><h2>文字の並べ方</h2>
+   <div class="segmented" role="group" aria-label="文字揃え"><button data-align="left" class="active">左揃え</button><button data-align="center">中央</button><button data-align="right">右揃え</button></div>
+   <label class="check"><input type="checkbox" id="vertical">縦書きにする</label>
+   <p class="hint" id="vertical-hint" hidden>右の列から左へ読み進めます。揃え方は上・中央・下に対応します。</p>
+   <label class="range-label" for="line-height"><span>行間</span><output id="line-height-value">1.65</output></label><input id="line-height" type="range" min="1" max="3" step="0.05" value="1.65">
+  </div>
+  <div class="section"><h2>文字に、やわらかな光を。</h2>
+   <label class="check"><input id="glow" type="checkbox">glow（光彩）をつける</label>
+   <div class="row"><label class="label" for="glow-color">光の色</label><input id="glow-color" class="color-input" type="color" value="#ffffff" aria-label="glowの色"></div>
+   <label class="range-label" for="glow-size"><span>光の広がり</span><output id="glow-size-value">1.5</output></label><input id="glow-size" type="range" min="0.2" max="6" step="0.1" value="1.5">
+   <p class="hint">文字を選ぶと、その部分だけ変更できます。光彩もPNG・PDFにそのまま残ります。</p>
+  </div>
+ </div>
+ <div id="panel-background" class="panel" role="tabpanel" aria-labelledby="tab-background" hidden>
+  <div class="section"><p class="eyebrow">BACKGROUND</p><h2>一枚の写真から。</h2>
+   <img id="bg-thumb" class="bg-thumb" alt="選択した背景画像" hidden>
+   <button class="upload" id="choose-image"><span aria-hidden="true">＋</span><span>ライブラリから画像を選ぶ</span></button>
+   <p class="hint">写真はこのブラウザー内で処理します。<br>JPEG・PNG・WebPに対応しています。</p>
+   <button id="remove-image" class="quiet" hidden>背景画像をはずす</button>
+  </div>
+  <div class="section"><h2>画像の収め方</h2>
+   <label class="field"><span class="label">配置</span><select id="fit"><option value="cover">画面いっぱい（切り抜き）</option><option value="contain">余白をつけて全体を入れる</option><option value="height">縦に合わせる</option><option value="width">横に合わせる</option></select></label>
+   <label class="range-label" for="opacity"><span>不透明度</span><output id="opacity-value">100%</output></label><input id="opacity" type="range" min="0" max="100" value="100">
+   <label class="range-label" for="zoom"><span>拡大</span><output id="zoom-value">100%</output></label><input id="zoom" type="range" min="1" max="5" step="0.01" value="1">
+   <label class="range-label" for="image-x"><span>左右の位置</span></label><input id="image-x" type="range" min="-300" max="300" step="1" value="0">
+   <label class="range-label" for="image-y"><span>上下の位置</span></label><input id="image-y" type="range" min="-300" max="300" step="1" value="0">
+   <button id="reset-image">位置と拡大をリセット</button>
+  </div>
+  <div class="text-mode-note">背景タブでは、用紙上をドラッグして画像を移動できます。2本指でピンチすると拡大できます。「画面いっぱい」での調整に便利です。</div>
+ </div>
+ <div id="panel-page" class="panel" role="tabpanel" aria-labelledby="tab-page" hidden>
+  <div class="section"><p class="eyebrow">PAPER</p><h2>余白を、整える。<span class="badge">A4</span></h2>
+   <div class="segmented" role="group" aria-label="用紙の向き"><button data-orientation="portrait" class="active">▯ 縦</button><button data-orientation="landscape">▭ 横</button></div>
+   <div class="row" style="margin-top:16px"><label class="label" for="paper-color">用紙の色</label><input id="paper-color" class="color-input" type="color" value="#ffffff"></div>
+  </div>
+  <div class="section"><h2>文字範囲の余白 <span>mm / 20 mm = 2 cm</span></h2><div class="margin-grid">
+   ${[['top','上'],['bottom','下'],['left','左'],['right','右']].map(([key,label])=>`<label class="field"><span class="label">${label}</span><div class="number-unit"><input id="margin-${key}" data-margin="${key}" type="number" min="0" max="70" value="20"><span>mm</span></div></label>`).join('')}
+   </div><label class="check" style="margin-top:12px"><input id="show-guides" type="checkbox" checked>余白ガイドを表示</label><p class="hint">ガイドは書き出されません。初期設定は上下左右とも2 cmです。</p>
+  </div>
+  <div class="section"><h2>原稿を残す</h2><p class="hint">編集中の原稿は、このブラウザーに自動保存します。別の端末でも編集するには、上の「原稿を保存」でファイルを保存してください。</p><button id="new-document" style="margin-top:14px">新しい原稿</button></div>
+ </div>
+</aside>
+<main class="stage" aria-label="A4プレビュー">
+ <div class="stage-bar"><div><input id="title" class="document-name" maxlength="100" aria-label="原稿の名前"></div><div class="stage-meta"><span id="page-meta">A4 · 210 × 297 mm</span><div class="history"><button id="undo" aria-label="元に戻す" title="元に戻す">↶</button><button id="redo" aria-label="やり直す" title="やり直す">↷</button></div><button id="fullscreen" class="quiet" aria-label="画面いっぱいで編集" title="画面いっぱいで編集">⛶</button></div></div>
+ <div class="canvas-scroll" id="canvas-scroll"><div class="paper-wrap" id="paper-wrap"><canvas id="canvas" aria-label="仕上がりのプレビュー"></canvas><div class="guides" id="guides"></div><div class="empty-note" id="empty-note"><b>余白から、はじめよう。</b><small>左の文字欄に、ことばを添えて。</small></div></div></div>
+ <div class="stage-footer"><span id="save-status" role="status"><i class="dot"></i>このブラウザーに自動保存</span><span id="overflow" class="warning" role="status" hidden>文字が用紙からはみ出しています。サイズや余白を調整してください。</span><span id="char-count">0 文字</span></div>
+</main>
+</div>
+<input id="image-file" type="file" accept="image/jpeg,image/png,image/webp" hidden>
+<input id="project-file" type="file" accept=".kasane,.json,application/json" hidden>
+<dialog id="export-dialog" aria-labelledby="export-heading"><div class="dialog-top"><h2 id="export-heading">仕上がりを確認</h2><button id="close-export" class="quiet" aria-label="閉じる">✕</button></div><p class="hint">A4・300 dpiで保存します。背景・文字・光彩を一枚に重ねます。</p><img id="export-preview" alt="書き出す画像のプレビュー"><p id="export-warning" class="warning" hidden>用紙に収まらない文字があります。編集画面で調整してください。</p><div class="export-options"><select id="export-format" aria-label="書き出す形式"><option value="png">PNG 画像</option><option value="pdf">PDF（A4）</option></select><button id="confirm-export" class="primary">保存する ↗</button></div><p class="hint">iPadでは保存後、共有ボタンから「画像を保存」や「ファイルに保存」を選べます。</p></dialog>
+<dialog id="new-dialog" aria-labelledby="new-heading"><div class="dialog-top"><h2 id="new-heading">新しい原稿にしますか？</h2></div><p class="hint">現在の原稿は置き換わります。必要なら先に「原稿を保存」してください。</p><div class="export-options"><button id="cancel-new">戻る</button><button id="confirm-new" class="primary">新しくする</button></div></dialog>
+<div class="toast" id="toast" role="status" hidden></div>`;
+
+let state=initialState(), image=null, tab='text', selection=[0,0], history=[], future=[], saveTimer, toastTimer, composing=false, overflow=false;
+let fontReady=Promise.resolve(), fontKey='', drawing=0, hasBooted=false;
+const canvas=$('canvas'), text=$('text');
+function toast(message) { $('toast').textContent=message; $('toast').hidden=false; clearTimeout(toastTimer); toastTimer=setTimeout(()=>$('toast').hidden=true,5000); }
+function remember() { history.push(JSON.stringify(state)); if(history.length>40)history.shift(); future=[]; updateHistory(); }
+function updateHistory(){ $('undo').disabled=!history.length; $('redo').disabled=!future.length; }
+function changed({sync=true}={}) {
+  if(sync) syncControls(); scheduleDraw(); clearTimeout(saveTimer);
+  $('save-status').textContent='保存中…';
+  saveTimer=setTimeout(async()=>{ try{await saveDraft(state); $('save-status').textContent='✓ このブラウザーに保存済み';}catch{$('save-status').textContent='自動保存できません。原稿を保存してください';} },450);
+}
+function fitPaper() {
+  const [w,h]=dimensions(state), container=$('canvas-scroll');
+  const styles=getComputedStyle(container), availableW=container.clientWidth-parseFloat(styles.paddingLeft)-parseFloat(styles.paddingRight);
+  const availableH=container.clientHeight-parseFloat(styles.paddingTop)-parseFloat(styles.paddingBottom);
+  const width=Math.max(50,Math.min(availableW,availableH*w/h,850));
+  $('paper-wrap').style.width=`${width}px`; $('paper-wrap').style.height=`${width*h/w}px`;
+  const m=state.margins; Object.assign($('guides').style,{top:`${m.top/h*100}%`,bottom:`${m.bottom/h*100}%`,left:`${m.left/w*100}%`,right:`${m.right/w*100}%`});
+}
+async function ensureFonts() {
+  const styles=[state.style,...state.styles.filter(Boolean)], unique=new Map();
+  for(const s of styles) unique.set(`${s.family}:${s.bold}`,s);
+  const key=[...unique.keys()].sort().join('|')+'|'+state.text;
+  if(key===fontKey) return fontReady;
+  fontKey=key;
+  // Explicitly load the font subsets used by Canvas; Canvas alone doesn't trigger CSS font loading.
+  fontReady=Promise.all([...unique.values()].map(s=>document.fonts.load(`${s.bold?(s.family==='textbook'?600:700):400} 24px ${families[s.family]}`, state.text || '写真にことばを。ABC')));
+  return fontReady;
+}
+function scheduleDraw(){ cancelAnimationFrame(drawing); drawing=requestAnimationFrame(draw); }
+async function draw(){
+  try { await ensureFonts(); } catch { toast('フォントを読み込めませんでした。通信を確認してください。'); }
+  const result=render(canvas,state,image); overflow=result.overflow;
+  $('overflow').hidden=!overflow; $('empty-note').hidden=!!state.text || !!image;
+  $('char-count').textContent=`${[...state.text].length.toLocaleString()} 文字`;
+  fitPaper();
+}
+function activeStyle(){ return {...state.style,...(selection[0]!==selection[1]?state.styles[selection[0]]:null)}; }
+function selectionInfo(){ const [a,b]=selection; $('selection-info').textContent=a!==b?`${b-a} 文字を選択中 · 設定は選択範囲に反映します`:'選択なし · 設定は文字全体に反映します'; }
+function syncControls(){
+  const s=activeStyle();
+  for(const [id,v] of Object.entries({family:s.family,size:s.size,color:s.color,'glow-color':s.glowColor,'glow-size':s.glowSize,fit:state.background.fit,opacity:state.background.opacity,zoom:state.background.zoom,'image-x':state.background.x,'image-y':state.background.y,'line-height':state.lineHeight,'paper-color':state.paper,title:state.title})) $(id).value=v;
+  $('bold').setAttribute('aria-pressed',s.bold); $('bold').classList.toggle('active',s.bold); $('bold').style.background=s.bold?'#e4eddf':'';
+  $('glow').checked=s.glow; $('vertical').checked=state.vertical; $('vertical-hint').hidden=!state.vertical;
+  $('glow-size-value').value=s.glowSize; $('line-height-value').value=state.lineHeight;
+  $('opacity-value').value=`${state.background.opacity}%`; $('zoom-value').value=`${Math.round(state.background.zoom*100)}%`;
+  for(const k in state.margins) $('margin-'+k).value=state.margins[k];
+  document.querySelectorAll('[data-align]').forEach((b,i)=>{b.classList.toggle('active',b.dataset.align===state.align); b.textContent=state.vertical?['上揃え','中央','下揃え'][i]:['左揃え','中央','右揃え'][i];});
+  document.querySelectorAll('[data-orientation]').forEach(b=>b.classList.toggle('active',b.dataset.orientation===state.orientation));
+  $('page-meta').textContent=`A4 · ${dimensions(state).join(' × ')} mm`;
+  $('bg-thumb').hidden=!image; $('remove-image').hidden=!image; if(image) $('bg-thumb').src=image.src;
+  $('paper-wrap').classList.toggle('adjust',tab==='background');
+  selectionInfo(); updateHistory();
+}
+function applyStyle(patch) {
+  remember(); const [a,b]=selection;
+  if(a!==b) {for(let i=a;i<b;i++) state.styles[i]={...state.style,...state.styles[i],...patch};}
+  else {state.style={...state.style,...patch};state.styles=state.styles.map(s=>s?{...s,...patch}:s);}
+  changed();
+  // Keep the logical selection while controls own focus; never insert an accidental newline.
+}
+function captureSelection(){ selection=[text.selectionStart,text.selectionEnd];syncControls(); }
+text.addEventListener('select',captureSelection);
+text.addEventListener('keyup',()=>{if(!composing)captureSelection();});
+text.addEventListener('pointerup',()=>setTimeout(captureSelection,0));
+text.addEventListener('compositionstart',()=>{remember();composing=true;});
+text.addEventListener('compositionend',()=>{composing=false;captureSelection();});
+text.addEventListener('beforeinput',()=>{if(!composing)remember();});
+text.addEventListener('input',()=>{
+  const old=state.text, next=text.value; let start=0;
+  while(start<old.length && start<next.length && old[start]===next[start])start++;
+  let tail=0; while(tail<old.length-start && tail<next.length-start && old[old.length-1-tail]===next[next.length-1-tail])tail++;
+  const inserted=next.length-start-tail, inherited={...state.style,...state.styles[Math.max(0,start-1)]};
+  state.styles=[...state.styles.slice(0,start),...Array.from({length:inserted},()=>({...inherited})),...state.styles.slice(old.length-tail)];
+  state.text=next;selection=[text.selectionStart,text.selectionEnd];changed({sync:false});selectionInfo();
+});
+for(const [id,key] of [['family','family'],['color','color'],['glow-color','glowColor']]) $(id).addEventListener('change',e=>applyStyle({[key]:e.target.value}));
+$('size').addEventListener('change',e=>{const v=Number(e.target.value);if(!Number.isFinite(v)||v<6||v>200){syncControls();return;}applyStyle({size:v});});
+$('size').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();e.target.blur();}});
+for(const [id,delta] of [['smaller',-2],['larger',2]]) $(id).onclick=()=>{
+  const [a,b]=selection;
+  if(a===b) applyStyle({size:Math.max(6,Math.min(200,activeStyle().size+delta))});
+  else {remember(); for(let i=a;i<b;i++){const s={...state.style,...state.styles[i]};state.styles[i]={...s,size:Math.max(6,Math.min(200,s.size+delta))};}changed();}
+};
+$('bold').onclick=()=>applyStyle({bold:!activeStyle().bold});
+$('glow').onchange=e=>applyStyle({glow:e.target.checked});
+$('glow-size').addEventListener('pointerdown',()=>remember());
+$('glow-size').addEventListener('keydown',e=>{if(['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Home','End'].includes(e.key))remember();});
+$('glow-size').oninput=e=>{ // Range edits are grouped into a single undo entry for pointer interaction.
+  const patch={glowSize:Number(e.target.value)}, [a,b]=selection;
+  if(a!==b)for(let i=a;i<b;i++)state.styles[i]={...state.style,...state.styles[i],...patch};
+  else{state.style={...state.style,...patch};state.styles=state.styles.map(s=>s?{...s,...patch}:s);}changed();
+};
+function updateValue(fn){remember();fn();changed();}
+$('vertical').onchange=e=>updateValue(()=>state.vertical=e.target.checked);
+$('paper-color').onchange=e=>updateValue(()=>state.paper=e.target.value);
+$('title').onchange=e=>updateValue(()=>state.title=e.target.value.trim()||'無題のかさね');
+$('show-guides').onchange=e=>$('guides').hidden=!e.target.checked;
+for(const id of ['line-height','opacity','zoom','image-x','image-y']) {
+  $(id).addEventListener('pointerdown',()=>remember());
+  $(id).addEventListener('keydown',e=>{if(['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Home','End'].includes(e.key))remember();});
+  $(id).oninput=e=>{const n=Number(e.target.value);if(id==='line-height')state.lineHeight=n;else state.background[{'image-x':'x','image-y':'y'}[id]||id]=n;changed();};
+}
+$('fit').onchange=e=>updateValue(()=>{Object.assign(state.background,{fit:e.target.value,x:0,y:0,zoom:1});});
+$('reset-image').onclick=()=>updateValue(()=>Object.assign(state.background,{x:0,y:0,zoom:1}));
+document.querySelectorAll('[data-margin]').forEach(el=>el.onchange=()=>updateValue(()=>state.margins[el.dataset.margin]=Math.max(0,Math.min(70,Number(el.value)||0))));
+document.querySelectorAll('[data-align]').forEach(b=>b.onclick=()=>updateValue(()=>state.align=b.dataset.align));
+document.querySelectorAll('[data-orientation]').forEach(b=>b.onclick=()=>updateValue(()=>{state.orientation=b.dataset.orientation;}));
+function setTab(name){tab=name;document.querySelectorAll('[data-tab]').forEach(b=>{const active=b.dataset.tab===name;b.setAttribute('aria-selected',active);b.tabIndex=active?0:-1;$('panel-'+b.dataset.tab).hidden=!active;});syncControls();}
+document.querySelectorAll('[data-tab]').forEach(b=>{b.onclick=()=>setTab(b.dataset.tab);b.onkeydown=e=>{if(['ArrowLeft','ArrowRight','Home','End'].includes(e.key)){e.preventDefault();const tabs=['text','background','page'];let i=tabs.indexOf(tab);i=e.key==='Home'?0:e.key==='End'?2:(i+(e.key==='ArrowLeft'?-1:1)+3)%3;setTab(tabs[i]);$('tab-'+tabs[i]).focus();}};});
+function readDataURL(file){return new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.onerror=()=>reject(new Error('ファイルを読み込めませんでした。'));reader.readAsDataURL(file);});}
+function decodeImage(src){return new Promise((resolve,reject)=>{const img=new Image();img.onload=()=>resolve(img);img.onerror=()=>reject(new Error('画像を読み込めません。JPEG・PNG・WebPをお試しください。'));img.src=src;});}
+$('choose-image').onclick=()=>$('image-file').click();
+$('image-file').onchange=async e=>{
+  const file=e.target.files[0];e.target.value='';if(!file)return;
+  if(!['image/jpeg','image/png','image/webp'].includes(file.type)){toast('JPEG・PNG・WebP形式の画像を選んでください。');return;}
+  if(file.size>40000000){toast('画像が大きすぎます。40 MB以下の画像を選んでください。');return;}
+  try{
+    $('choose-image').disabled=true;
+    let img=await decodeImage(await readDataURL(file));
+    // Bound memory on tablets and keep portable project files a reasonable size.
+    const ratio=Math.min(1,4096/Math.max(img.naturalWidth,img.naturalHeight));
+    const temp=document.createElement('canvas'); temp.width=Math.round(img.naturalWidth*ratio);temp.height=Math.round(img.naturalHeight*ratio);temp.getContext('2d').drawImage(img,0,0,temp.width,temp.height);
+    const src=temp.toDataURL(file.type==='image/png'?'image/png':'image/jpeg',.94);
+    if(src.length>25000000)throw new Error('画像が大きすぎます。少し小さな画像を選んでください。');
+    img=await decodeImage(src);remember();image=img;Object.assign(state.background,{src,zoom:1,x:0,y:0});changed();
+  }catch(error){toast(error.message);}finally{$('choose-image').disabled=false;}
+};
+$('remove-image').onclick=()=>updateValue(()=>{image=null;state.background.src='';});
+async function restore(next){state=next;selection=[0,0];text.value=state.text;image=state.background.src?await decodeImage(state.background.src):null;changed();}
+async function undo(){if(!history.length)return;future.push(JSON.stringify(state));await restore(JSON.parse(history.pop()));}
+async function redo(){if(!future.length)return;history.push(JSON.stringify(state));await restore(JSON.parse(future.pop()));}
+$('undo').onclick=undo;$('redo').onclick=redo;
+document.addEventListener('keydown',e=>{
+  if(e.key==='Escape' && document.body.classList.contains('fullscreen')) toggleFullscreen();
+  if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==='z'&&!composing){e.preventDefault();e.shiftKey?redo():undo();}
+  if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==='s'){e.preventDefault();saveProject();}
+});
+function download(blob,name){const url=URL.createObjectURL(blob),link=document.createElement('a');link.href=url;link.download=name;document.body.append(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),60000);}
+function filename(){return state.title.replace(/[<>:"/\\|?*\u0000-\u001f]/g,'_').trim()||'かさね';}
+function saveProject(){download(new Blob([JSON.stringify(state)],{type:'application/json'}),filename()+'.kasane');toast('編集できる原稿ファイルを保存しました。');}
+$('save-project').onclick=saveProject;
+$('open-project').onclick=()=>$('project-file').click();
+$('project-file').onchange=async e=>{
+  const file=e.target.files[0];e.target.value='';if(!file)return;
+  if(file.size>30000000){toast('原稿ファイルが大きすぎます。');return;}
+  try{const next=validateProject(JSON.parse(await file.text()));const nextImage=next.background.src?await decodeImage(next.background.src):null;remember();state=next;image=nextImage;text.value=state.text;selection=[0,0];changed();toast('原稿を開きました。');}catch{toast('原稿を開けませんでした。「かさね」で保存した原稿ファイルを選んでください。');}
+};
+$('new-document').onclick=()=>$('new-dialog').showModal();$('cancel-new').onclick=()=>$('new-dialog').close();
+$('confirm-new').onclick=()=>{remember();restore(initialState());$('new-dialog').close();};
+function toggleFullscreen(){document.body.classList.toggle('fullscreen');$('fullscreen').setAttribute('aria-label',document.body.classList.contains('fullscreen')?'編集画面に戻る':'画面いっぱいで編集');requestAnimationFrame(fitPaper);}
+$('fullscreen').onclick=toggleFullscreen;
+let exportCanvas=null;
+async function openExport(){
+  try{await ensureFonts(); exportCanvas=document.createElement('canvas');const result=render(exportCanvas,state,image,{dpi:150});$('export-warning').hidden=!result.overflow;$('export-preview').src=exportCanvas.toDataURL('image/png');$('export-dialog').showModal();}catch{toast('プレビューを作れませんでした。画像のサイズを小さくしてお試しください。');}
+}
+$('export-button').onclick=openExport;$('preview-button').onclick=openExport;$('close-export').onclick=()=>$('export-dialog').close();
+$('confirm-export').onclick=async()=>{
+  document.body.classList.add('busy');$('confirm-export').disabled=true;
+  try{
+    await ensureFonts();const output=document.createElement('canvas');render(output,state,image,{dpi:300});
+    if($('export-format').value==='pdf'){
+      const {jsPDF}=await import('jspdf');const pdf=new jsPDF({orientation:state.orientation,unit:'mm',format:'a4',compress:true});
+      const [w,h]=dimensions(state);pdf.addImage(output.toDataURL('image/png'),'PNG',0,0,w,h,undefined,'FAST');pdf.setProperties({title:state.title,creator:'かさね'});download(pdf.output('blob'),filename()+'.pdf');
+    }else{
+      const blob=await pngWithDpi(output,300);download(blob,filename()+'.png');
+    }
+    toast('書き出しました。ダウンロードしたファイルをご確認ください。');
+  }catch(error){console.error(error);toast('書き出せませんでした。画像を小さくして、もう一度お試しください。');}
+  finally{document.body.classList.remove('busy');$('confirm-export').disabled=false;}
+};
+// Gesture coordinates use physical page units, so sliders and touch gestures share the same state.
+const pointers=new Map();let gesture=null;
+function gestureState(){const p=[...pointers.values()],a=p[0],b=p[1];return {cx:b?(a.x+b.x)/2:a.x,cy:b?(a.y+b.y)/2:a.y,d:b?Math.hypot(a.x-b.x,a.y-b.y):0};}
+function beginGesture(){gesture={...gestureState(),zoom:state.background.zoom,x:state.background.x,y:state.background.y};}
+canvas.addEventListener('pointerdown',e=>{
+  if(tab!=='background'||!image)return;e.preventDefault();canvas.setPointerCapture(e.pointerId);
+  if(!pointers.size)remember();pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});beginGesture();
+});
+canvas.addEventListener('pointermove',e=>{
+  if(!pointers.has(e.pointerId)||!gesture)return;e.preventDefault();pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});
+  const p=gestureState(),[w]=dimensions(state),rect=canvas.getBoundingClientRect(),mm=w/rect.width;
+  const zoom=gesture.d&&p.d?Math.max(1,Math.min(5,gesture.zoom*p.d/gesture.d)):gesture.zoom;
+  const factor=zoom/gesture.zoom;
+  // Keep the image point below the pinch centre anchored during scaling.
+  const centerX=rect.left+rect.width/2,centerY=rect.top+rect.height/2;
+  state.background.x=Math.max(-300,Math.min(300,gesture.x*factor+(p.cx-centerX-(gesture.cx-centerX)*factor)*mm));
+  state.background.y=Math.max(-300,Math.min(300,gesture.y*factor+(p.cy-centerY-(gesture.cy-centerY)*factor)*mm));
+  state.background.zoom=zoom;changed();
+});
+for(const event of ['pointerup','pointercancel','lostpointercapture'])canvas.addEventListener(event,e=>{if(!pointers.has(e.pointerId))return;pointers.delete(e.pointerId);if(pointers.size)beginGesture();else gesture=null;});
+new ResizeObserver(()=>fitPaper()).observe($('canvas-scroll'));
+window.addEventListener('pagehide',()=>{if(hasBooted)saveDraft(state).catch(()=>{});});
+async function boot(){
+  try{const saved=await loadDraft();if(saved){state=validateProject(saved);image=state.background.src?await decodeImage(state.background.src):null;text.value=state.text;}}catch{toast('前回の原稿を復元できませんでした。保存した原稿ファイルから開けます。');}
+  hasBooted=true;syncControls();await draw();document.documentElement.dataset.ready='true';
+}
+boot();
