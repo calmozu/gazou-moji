@@ -16,7 +16,7 @@ export const overlayPanel=`
   <label id="overlay-select-field" class="field" hidden><span class="label">編集する画像レイヤー</span><select id="overlay-select"></select></label>
  </div>
  <div id="overlay-controls" hidden>
-  <div class="section"><h2>画像のトリミング</h2><button id="crop-overlay">枠の中で画像を調整</button><button id="remove-crop-overlay" hidden>トリミングを解除</button><p class="hint">枠の中で画像を移動・拡大できます。四角・角丸・丸の枠を選べます。</p></div>
+  <div class="section"><h2>画像のトリミング</h2><button id="crop-overlay">枠の中で画像を調整</button><button id="remove-crop-overlay" hidden>トリミングを解除</button><p class="hint">枠の中で画像を移動・拡大できます。四角・角丸・丸の枠を選べます。縁取りの柄や色もここで調整できます。</p></div>
   <div class="section"><h2>背景を透明にする</h2><button id="cutout-overlay">背景を切り抜く</button><button id="restore-overlay" hidden>元画像に戻す</button><p class="hint">背景色を選んで消す／人物を自動で残す、の2通りで調整できます。</p><button id="save-overlay-png" class="clipboard-paste">この画像を透過PNGで保存</button><p class="hint">この画像だけを透明な背景で保存します。用紙全体の保存は上の「PNGで書き出す」から。</p></div>
   <div class="section"><h2>位置と大きさ</h2><p class="hint" id="overlay-help">用紙上の青い枠をドラッグして移動。四隅の丸で縦横比を保って大きさを変えられます。</p>
    <div class="margin-grid" style="margin-top:14px">${[['x','左から'],['y','上から'],['width','幅'],['height','高さ']].map(([key,label])=>`<label class="field"><span class="label">${label}</span><div class="number-unit"><input id="overlay-${key}" data-overlay-value="${key}" type="number" min="0" step="0.1"><span data-layout-unit>mm</span></div></label>`).join('')}</div>
