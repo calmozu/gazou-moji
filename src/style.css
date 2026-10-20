@@ -3,3 +3,5 @@
 .stage-meta{min-width:0}.stage-meta #page-meta{overflow:hidden;white-space:nowrap;text-overflow:ellipsis;min-width:0}.stage-meta .history,.stage-meta #fullscreen{flex-shrink:0}.stage-bar>div:first-child{min-width:0}
 .box-selector{margin-bottom:14px}.text-box:not(.inactive-box){z-index:2}.text-box.inactive-box{z-index:1;border-color:#8d9c8b;cursor:pointer}.inactive-box .text-box-caption{color:#778574}
 .box-actions{margin:-4px 0 14px}.box-actions button{font-size:12px;padding:8px 6px}.box-delete{display:block;margin:-6px 0 10px;color:#965342;font-size:11px;padding:3px 4px;min-height:32px}
+
+.box-align{width:100%;margin:-4px 0 14px;font-size:12px}

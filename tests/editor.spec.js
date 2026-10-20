@@ -264,3 +264,22 @@ test('deleted BOX2 leaves no pixels in saved PNG and BOX1 remains intact',async(
   const data=(await fs.readFile(await file.path())).toString('base64');const counts=await page.evaluate(async base64=>{const im=await createImageBitmap(await(await fetch('data:image/png;base64,'+base64)).blob()),c=document.createElement('canvas');c.width=im.width;c.height=im.height;const ctx=c.getContext('2d');ctx.drawImage(im,0,0);const d=ctx.getImageData(0,0,c.width,c.height).data;let red=0,blue=0;for(let i=0;i<d.length;i+=4){if(d[i]>d[i+1]+60&&d[i]>d[i+2]+60)red++;if(d[i+2]>d[i]+60&&d[i+2]>d[i+1]+60)blue++;}return {red,blue};},data);
   expect(counts.red).toBeGreaterThan(100);expect(counts.blue).toBe(0);
 });
+
+for(const format of ['a4','short-mini'])test(`BOX2 left edge aligns to BOX1 with undo and persistence (${format})`,async({page})=>{
+  await ready(page);await expect(page.locator('#align-box-left')).toBeHidden();
+  if(format!=='a4'){await page.locator('#tab-page').click();await page.locator('#page-size').selectOption(format);await page.locator('#tab-text').click();}
+  await page.locator('#text').fill('見出し');await changeBox(page,{x:40,y:30,width:100,height:50});
+  await page.locator('#copy-text-box').click();await page.locator('#text').fill('本文');await changeBox(page,{x:70,y:100,width:80,height:60});
+  const before=await project(page);await page.locator('#align-box-left').click();const after=await project(page);
+  expect(after.textBox).toEqual(before.textBox);expect(after.text).toBe(before.text);
+  expect(after.secondTextBox).toEqual({...before.secondTextBox,textBox:{...before.secondTextBox.textBox,x:before.textBox.x}});
+  await page.locator('#undo').click();expect((await project(page)).secondTextBox).toEqual(before.secondTextBox);
+  await page.locator('#redo').click();expect((await project(page)).secondTextBox).toEqual(after.secondTextBox);
+  await page.locator('#select-box-1').click();await expect(page.locator('#align-box-left')).toBeHidden();await page.locator('#select-box-2').click();await expect(page.locator('#align-box-left')).toBeVisible();
+  await expect(page.locator('#save-status')).toContainText('保存済み');await page.reload();await expect(page.locator('html')).toHaveAttribute('data-ready','true');expect((await project(page)).secondTextBox).toEqual(after.secondTextBox);
+});
+
+test('alignment keeps a wide BOX2 intact and explains when it would leave the page',async({page})=>{
+  await ready(page);await changeBox(page,{width:50,x:140});await page.locator('#add-text-box').click();await changeBox(page,{x:0,width:100});
+  const before=await project(page);await page.locator('#align-box-left').click();await expect(page.locator('#toast')).toContainText('BOX2の幅を小さく');expect((await project(page)).secondTextBox).toEqual(before.secondTextBox);
+});

@@ -31,6 +31,7 @@ document.querySelector('#app').innerHTML = `
   <div class="section"><p class="eyebrow">WORDS</p><h2>重ねたい、ことば。</h2>
    <div class="segmented box-selector" role="group" aria-label="編集する文字ボックス"><button id="select-box-1" class="active" aria-pressed="true">BOX1</button><button id="select-box-2" aria-pressed="false" hidden>BOX2</button></div>
    <div id="box-create-actions" class="row box-actions"><button id="add-text-box">空のBOX2を追加</button><button id="copy-text-box">BOX1をコピー</button></div>
+   <button id="align-box-left" class="box-align" hidden>左端をBOX1にそろえる</button>
    <button id="delete-text-box" class="quiet box-delete" hidden>BOX2を削除</button>
    <label for="text" class="label" id="text-label">BOX1の本文</label><textarea id="text" maxlength="30000" placeholder="ここに文字を入力してください。&#10;&#10;写真にそっと、ことばを重ねて。" spellcheck="false"></textarea>
    <p id="selection-info">選択なし · 設定は文字全体に反映します</p>
@@ -121,6 +122,13 @@ function createSecondBox(copyFirst=false){
 }
 $('add-text-box').onclick=()=>createSecondBox();
 $('copy-text-box').onclick=()=>createSecondBox(true);
+$('align-box-left').onclick=()=>{
+  if(!state.secondTextBox||activeTextBox!==1)return;
+  const first=textBounds(state),second=textBounds(editState(state.secondTextBox)),[w]=dimensions(state);
+  if(first.x+second.width>w){toast('この位置ではBOX2が用紙からはみ出します。BOX2の幅を小さくしてから整列してください。');return;}
+  if(second.x===first.x)return;
+  updateValue(()=>{state.secondTextBox.textBox={...second,x:first.x};});
+};
 $('delete-text-box').onclick=()=>{
   if(!state.secondTextBox)return;
   remember();state.secondTextBox=null;chooseLayer(0);changed();$('select-box-1').focus({preventScroll:true});toast('BOX2を削除しました。「元に戻す」で復元できます。');
@@ -165,6 +173,7 @@ function selectionInfo(){ const [a,b]=selection; $('selection-info').textContent
 function syncControls(){
   if(activeTextBox===1&&!state.secondTextBox)activeTextBox=0;
   $('select-box-2').hidden=!(state.secondTextBox);$('add-text-box').hidden=!!state.secondTextBox;
+  $('align-box-left').hidden=!state.secondTextBox||activeTextBox!==1;
   $('box-create-actions').hidden=!!state.secondTextBox;$('delete-text-box').hidden=!state.secondTextBox||activeTextBox!==1;
   for(const i of [0,1]){$('select-box-'+(i+1)).classList.toggle('active',activeTextBox===i);$('select-box-'+(i+1)).setAttribute('aria-pressed',activeTextBox===i);}
   $('text-label').textContent=`BOX${activeTextBox+1}の本文`;
