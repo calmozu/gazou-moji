@@ -371,3 +371,39 @@ test('opening a draft without images clears every editor frame and undo restores
   await ready(page);const empty=await project(page);await page.locator('#tab-overlay').click();await overlayUpload(page);await overlayUpload(page,'#0044cc','マーク2.png');await expect(page.locator('.overlay-frame')).toHaveCount(2);
   await page.locator('#project-file').setInputFiles({name:'empty.kasane',mimeType:'application/json',buffer:Buffer.from(JSON.stringify(empty))});await expect(page.locator('.overlay-frame')).toHaveCount(0);await page.locator('#undo').click();await expect(page.locator('.overlay-frame')).toHaveCount(2);expect((await project(page)).overlays).toHaveLength(2);
 });
+
+test('text colour presets preserve selection, independent boxes, undo and saved drafts',async({page})=>{
+  await ready(page);await page.locator('#text').fill('黄金の見出し');
+  await page.locator('#text').evaluate(el=>{el.focus();el.setSelectionRange(0,2);el.dispatchEvent(new Event('select'));});await page.locator('#fill-preset').selectOption('gold');
+  let s=await project(page);expect(s.styles[0].fillPreset).toBe('gold');expect(s.styles[1].fillPreset).toBe('gold');expect(s.styles[2].fillPreset).toBe('solid');await expect(page.locator('#preset-preview')).toBeVisible();
+  await page.locator('#undo').click();expect((await project(page)).styles[0].fillPreset).toBe('solid');await page.locator('#redo').click();expect((await project(page)).styles[0].fillPreset).toBe('gold');
+  await page.locator('#copy-text-box').click();await page.locator('#fill-preset').selectOption('silver');s=await project(page);expect(s.secondTextBox.style.fillPreset).toBe('silver');expect(s.secondTextBox.styles.every(style=>style.fillPreset==='silver')).toBe(true);expect(s.styles[0].fillPreset).toBe('gold');
+  await page.locator('#color').evaluate(el=>{el.value='#cc2244';el.dispatchEvent(new Event('change',{bubbles:true}));});s=await project(page);expect(s.secondTextBox.style.fillPreset).toBe('solid');expect(s.secondTextBox.style.color).toBe('#cc2244');await expect(page.locator('#fill-preset')).toHaveValue('solid');await expect(page.locator('#preset-preview')).toBeHidden();
+  await page.locator('#undo').click();await expect(page.locator('#fill-preset')).toHaveValue('silver');await expect(page.locator('#save-status')).toContainText('保存済み');const before=await project(page);await page.reload();await expect(page.locator('html')).toHaveAttribute('data-ready','true');expect((await project(page)).styles).toEqual(before.styles);expect((await project(page)).secondTextBox.style.fillPreset).toBe('silver');
+  await page.locator('#project-file').setInputFiles({name:'gold.kasane',mimeType:'application/json',buffer:Buffer.from(JSON.stringify(before))});expect((await project(page)).secondTextBox.style.fillPreset).toBe('silver');
+});
+
+test('metallic gradients paint multiple gold tones in both writing directions, with glow and mixed colours',async({page})=>{
+  await ready(page);await page.locator('#text').fill('黄金■');
+  const result=await page.evaluate(async()=>{
+    const {initialState,render,families}=await import('/src/render.js');await document.fonts.load('700 60px '+families.sans,'黄金■');const s=initialState();s.text='黄金■';s.style.size=60;s.style.bold=true;s.style.fillPreset='gold';s.textBox={x:30,y:30,width:140,height:180};const canvas=document.createElement('canvas');
+    function capture(){render(canvas,s,null);const data=canvas.getContext('2d').getImageData(0,0,canvas.width,canvas.height).data;let dark=0,light=0,red=0;for(let i=0;i<data.length;i+=4){const [r,g,b]=data.slice(i,i+3);if(r>g+10&&g>b+25){if(r<190)dark++;if(r>225)light++;}if(r>180&&g<70&&b<70)red++;}return {dark,light,red};}
+    const horizontal=capture();s.vertical=true;s.style.glow=true;s.style.glowColor='#88aadd';const vertical=capture();s.vertical=false;s.styles=[{...s.style,fillPreset:'solid',color:'#ff0000'}];const mixed=capture();return {horizontal,vertical,mixed};
+  });
+  for(const mode of ['horizontal','vertical','mixed']){expect(result[mode].dark).toBeGreaterThan(100);expect(result[mode].light).toBeGreaterThan(100);}expect(result.mixed.red).toBeGreaterThan(100);
+});
+
+test('every gradient preset appears in saved PNG and gold is embedded in PDF',async({page},info)=>{
+  await ready(page);await page.locator('#tab-page').click();await page.locator('#page-size').selectOption('short-mini');await page.locator('#tab-text').click();await page.locator('#text').fill('黄金の文字');await page.locator('#family').selectOption('heavy');await page.locator('#size').fill('64');await page.locator('#size').press('Enter');
+  for(const key of ['champagne','rose','silver','rainbow','gold']){
+    await page.locator('#fill-preset').selectOption(key);await expect(page.locator('#preset-preview')).toBeVisible();await page.locator('#export-button').click();const event=page.waitForEvent('download');await page.locator('#confirm-export').click();const file=await event;await file.saveAs(info.outputPath('preset-'+key+'.png'));
+    const data=await fs.readFile(await file.path());const tones=await page.evaluate(async data=>{const image=new Image();image.src='data:image/png;base64,'+data;await image.decode();const c=document.createElement('canvas');c.width=image.width;c.height=image.height;const ctx=c.getContext('2d');ctx.drawImage(image,0,0);const d=ctx.getImageData(0,0,c.width,c.height).data,colors=new Set();let colored=0;for(let i=0;i<d.length;i+=4)if(Math.max(d[i],d[i+1],d[i+2])-Math.min(d[i],d[i+1],d[i+2])>20){colored++;colors.add(d.slice(i,i+3).join(','));}return {colored,colors:colors.size};},data.toString('base64'));expect(tones.colored).toBeGreaterThan(100);expect(tones.colors).toBeGreaterThan(30);
+    if(key==='gold'){await page.locator('#export-format').selectOption('pdf');const pdf=page.waitForEvent('download');await page.locator('#confirm-export').click();await (await pdf).saveAs(info.outputPath('preset-gold.pdf'));}await page.locator('#close-export').click();
+  }
+});
+
+test('old solid-colour drafts keep their appearance and invalid preset names do not overwrite work',async({page})=>{
+  await ready(page);await page.locator('#text').fill('以前の原稿');const old=await project(page);delete old.style.fillPreset;for(const style of old.styles)delete style.fillPreset;
+  await page.locator('#project-file').setInputFiles({name:'old.kasane',mimeType:'application/json',buffer:Buffer.from(JSON.stringify(old))});await expect(page.locator('#fill-preset')).toHaveValue('solid');await page.locator('#fill-preset').selectOption('gold');const current=await project(page),bad=structuredClone(current);bad.styles[0].fillPreset='unknown';
+  await page.locator('#project-file').setInputFiles({name:'bad.kasane',mimeType:'application/json',buffer:Buffer.from(JSON.stringify(bad))});await expect(page.locator('#toast')).toContainText('原稿を開けませんでした');expect((await project(page)).styles).toEqual(current.styles);
+});

@@ -1,3 +1,4 @@
+import { colorPresets, presetGradient } from './presets.js';
 export const families = {
   sans: '"Noto Sans JP", sans-serif',
   serif: '"Noto Serif JP", serif',
@@ -11,7 +12,7 @@ export const families = {
   reggae: '"Reggae One", sans-serif',
 };
 export const familyLabels={sans:'角ゴシック',serif:'明朝',round:'丸ゴシック',textbook:'教科書風',handwriting:'手書き（よもぎ）',brush:'筆文字（佑字）',pop:'ポップ（はちまる）',heavy:'極太ゴシック',decorative:'飾り明朝',reggae:'個性派（レゲエ）'};
-export const baseStyle = { family: 'sans', size: 24, bold: false, color: '#252923', glow: false, glowColor: '#ffffff', glowSize: 1.5 };
+export const baseStyle = { family: 'sans', size: 24, bold: false, color: '#252923', fillPreset:'solid', glow: false, glowColor: '#ffffff', glowSize: 1.5 };
 export const pageFormats={
   a4: {label:'A4'},
   youtube: {label:'YouTube 横動画',pixels:[1920,1080]},
@@ -112,6 +113,8 @@ function drawText(ctx,state,scale) {
       if (/^[\u0020-\u007eー〜…―—（）［］「」『』【】]$/u.test(g.char)) ctx.rotate(Math.PI/2);
       else if (/^[、。，．]$/u.test(g.char)) ctx.translate(g.size*.28,-g.size*.28);
     } else { ctx.textAlign='left'; ctx.textBaseline='alphabetic'; }
+    const metrics=ctx.measureText(g.char),top=state.vertical?-g.size/2:-metrics.actualBoundingBoxAscent,bottom=state.vertical?g.size/2:metrics.actualBoundingBoxDescent;
+    ctx.fillStyle=presetGradient(ctx,g.style.fillPreset,0,top,0,Math.max(top+.001,bottom))||g.style.color;
     if (g.style.glow) {
       ctx.shadowColor=g.style.glowColor; ctx.shadowBlur=g.style.glowSize*scale;
       ctx.fillText(g.char,0,0); ctx.fillText(g.char,0,0);
@@ -128,7 +131,7 @@ export function validateProject(value) {
   const s = value;
   const num=(v,a,b)=>typeof v==='number' && Number.isFinite(v) && v>=a && v<=b;
   const color=v=>typeof v==='string' && /^#[0-9a-f]{6}$/i.test(v);
-  const validStyle=v=>v && Object.hasOwn(families,v.family) && num(v.size,6,200) && typeof v.bold==='boolean' && color(v.color) && typeof v.glow==='boolean' && color(v.glowColor) && num(v.glowSize,0.2,6);
+  const validStyle=v=>v && (v.fillPreset==null||v.fillPreset==='solid'||Object.hasOwn(colorPresets,v.fillPreset)) && Object.hasOwn(families,v.family) && num(v.size,6,200) && typeof v.bold==='boolean' && color(v.color) && typeof v.glow==='boolean' && color(v.glowColor) && num(v.glowSize,0.2,6);
   if (!s || s.version!==1 || typeof s.title!=='string' || s.title.length>100 || typeof s.text!=='string' || s.text.length>30000 || !['portrait','landscape'].includes(s.orientation) || typeof s.vertical!=='boolean' || !['left','center','right'].includes(s.align) || !num(s.lineHeight,1,3) || !color(s.paper) || !validStyle(s.style) || !Array.isArray(s.styles) || s.styles.length>s.text.length || !s.styles.every(v=>v===null || validStyle(v)) || !s.margins || !['top','right','bottom','left'].every(k=>num(s.margins[k],0,70))) throw new Error('対応していない原稿ファイルです。');
   if (s.letterSpacing!=null && !num(s.letterSpacing,-.5,.5)) throw new Error('文字間隔を読み込めません。');
   if (s.pageSize!=null && !Object.hasOwn(pageFormats,s.pageSize)) throw new Error('対応していない用紙サイズです。');

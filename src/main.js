@@ -1,3 +1,4 @@
+import { colorPresets, presetCSS } from './presets.js';
 import '@fontsource/yomogi/400.css';
 import '@fontsource/yuji-syuku/400.css';
 import '@fontsource/hachi-maru-pop/400.css';
@@ -47,6 +48,9 @@ document.querySelector('#app').innerHTML = `
    <label class="field"><span class="label">フォント</span><select id="family">${Object.entries(familyLabels).map(([key,label])=>`<option value="${key}">${label}</option>`).join('')}</select></label>
    <label class="label" for="size">文字サイズ</label><div class="size-buttons"><button id="smaller">小さく −</button><button id="larger">大きく ＋</button></div>
    <div class="row"><div class="number-unit"><input id="size" type="number" min="6" max="200" step="1" aria-label="文字サイズ"><span id="font-size-unit">pt</span></div><button id="bold" aria-pressed="false"><b>B</b> 太字</button><input class="color-input" id="color" type="color" aria-label="文字の色"></div>
+   <label class="field preset-field"><span class="label">文字色のプリセット</span><select id="fill-preset"><option value="solid">単色（色を選ぶ）</option>${Object.entries(colorPresets).map(([key,preset])=>`<option value="${key}">${preset.label}</option>`).join('')}</select></label>
+   <div id="preset-preview" class="preset-preview" aria-hidden="true" hidden><span>あ Aa</span></div>
+   <p class="hint">文字を選ぶと、その部分だけに適用します。色を選び直すと単色に戻ります。</p>
   </div>
   <div class="section"><h2>文字の並べ方</h2>
    <div class="segmented" role="group" aria-label="文字揃え"><button data-align="left" class="active">左揃え</button><button data-align="center">中央</button><button data-align="right">右揃え</button></div>
@@ -195,6 +199,8 @@ function syncControls(){
   $('text-box-other').hidden=tab!=='text'||!state.secondTextBox;
   const s=activeStyle();
   for(const [id,v] of Object.entries({family:s.family,size:s.size,color:s.color,'glow-color':s.glowColor,'glow-size':s.glowSize,fit:state.background.fit,opacity:state.background.opacity,zoom:state.background.zoom,'image-x':state.background.x,'image-y':state.background.y,'line-height':layer().lineHeight,'paper-color':state.paper,title:state.title})) $(id).value=v;
+  $('fill-preset').value=s.fillPreset||'solid';
+  $('preset-preview').hidden=!Object.hasOwn(colorPresets,s.fillPreset||'');$('preset-preview').firstElementChild.style.backgroundImage=presetCSS(s.fillPreset);
   $('bold').setAttribute('aria-pressed',s.bold); $('bold').classList.toggle('active',s.bold); $('bold').style.background=s.bold?'#e4eddf':'';
   $('glow').checked=s.glow; $('vertical').checked=layer().vertical; $('vertical-hint').hidden=!layer().vertical;
   $('glow-size-value').value=s.glowSize; $('line-height-value').value=layer().lineHeight;
@@ -249,7 +255,9 @@ text.addEventListener('input',()=>{
   layer().styles=[...layer().styles.slice(0,start),...Array.from({length:inserted},()=>({...inherited})),...layer().styles.slice(old.length-tail)];
   layer().text=next;selection=[text.selectionStart,text.selectionEnd];changed({sync:false});selectionInfo();
 });
-for(const [id,key] of [['family','family'],['color','color'],['glow-color','glowColor']]) $(id).addEventListener('change',e=>applyStyle({[key]:e.target.value}));
+for(const [id,key] of [['family','family'],['glow-color','glowColor']]) $(id).addEventListener('change',e=>applyStyle({[key]:e.target.value}));
+$('color').onchange=e=>applyStyle({color:e.target.value,fillPreset:'solid'});
+$('fill-preset').onchange=e=>applyStyle({fillPreset:e.target.value});
 $('size').addEventListener('change',e=>{const v=Number(e.target.value)/fontSizeFactor();if(!Number.isFinite(v)||v<6||v>200){syncControls();return;}applyStyle({size:v});});
 $('size').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();e.target.blur();}});
 for(const [id,delta] of [['smaller',-2],['larger',2]]) $(id).onclick=()=>{
