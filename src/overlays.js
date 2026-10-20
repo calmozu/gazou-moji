@@ -1,3 +1,5 @@
+import {createCropDialog} from './crop-dialog.js';
+import {overlayPNGCanvas} from './crop-image.js';
 import {createCutoutDialog} from './cutout.js';
 import {imageSourceBudget} from './cutout-settings.js';
 import { svgImageSource } from './svg-import.js';
@@ -14,10 +16,11 @@ export const overlayPanel=`
   <label id="overlay-select-field" class="field" hidden><span class="label">編集する画像レイヤー</span><select id="overlay-select"></select></label>
  </div>
  <div id="overlay-controls" hidden>
+  <div class="section"><h2>画像のトリミング</h2><button id="crop-overlay">枠の中で画像を調整</button><button id="remove-crop-overlay" hidden>トリミングを解除</button><p class="hint">枠の中で画像を移動・拡大できます。四角・角丸・丸の枠を選べます。</p></div>
   <div class="section"><h2>背景を透明にする</h2><button id="cutout-overlay">背景を切り抜く</button><button id="restore-overlay" hidden>元画像に戻す</button><p class="hint">背景色を選んで消す／人物を自動で残す、の2通りで調整できます。</p><button id="save-overlay-png" class="clipboard-paste">この画像を透過PNGで保存</button><p class="hint">この画像だけを透明な背景で保存します。用紙全体の保存は上の「PNGで書き出す」から。</p></div>
   <div class="section"><h2>位置と大きさ</h2><p class="hint" id="overlay-help">用紙上の青い枠をドラッグして移動。四隅の丸で縦横比を保って大きさを変えられます。</p>
    <div class="margin-grid" style="margin-top:14px">${[['x','左から'],['y','上から'],['width','幅'],['height','高さ']].map(([key,label])=>`<label class="field"><span class="label">${label}</span><div class="number-unit"><input id="overlay-${key}" data-overlay-value="${key}" type="number" min="0" step="0.1"><span data-layout-unit>mm</span></div></label>`).join('')}</div>
-   <p class="hint">幅・高さは連動します。</p><button id="center-overlay">用紙の中央へ</button>
+   <p class="hint" id="overlay-size-help">幅・高さは連動します。</p><button id="center-overlay">用紙の中央へ</button>
   </div>
   <div class="section"><h2>重なり方</h2>
    <label class="range-label" for="overlay-opacity"><span>不透明度</span><output id="overlay-opacity-value">100%</output></label><input id="overlay-opacity" type="range" min="0" max="100" value="100">
@@ -31,7 +34,7 @@ export const overlayPanel=`
 export function createOverlayEditor({getState,getImages,getTab,remember,changed,toast,readDataURL,decodeImage,layoutFactor,onAdded,saveImage}){
  const $=id=>document.getElementById(id),host=document.createElement('div');host.id='image-frames';$('paper-wrap').append(host);
  let selectedId=null,gesture=null,listKey='',loading=false;
- const openCutout=createCutoutDialog({decodeImage});
+ const openCutout=createCutoutDialog({decodeImage}),openCrop=createCropDialog({decodeImage});
  const items=()=>getState().overlays || [],active=()=>items().find(item=>item.id===selectedId);
  function commit(fn){remember();fn();changed();}
  function select(id){selectedId=id;sync();}
@@ -66,11 +69,19 @@ export function createOverlayEditor({getState,getImages,getTab,remember,changed,
   });
   if(!selected)return;
   $('restore-overlay').hidden=!selected.originalSrc;
-  for(const id of ['cutout-overlay','restore-overlay','save-overlay-png'])$(id).disabled=loading;
-  for(const key of ['x','y','width','height']){const el=$('overlay-'+key);el.value=+(selected[key]*factor).toFixed(1);el.min=key==='x'||key==='y'?0:.1;el.max=+((key==='x'?w-selected.width:key==='y'?h-selected.height:key==='width'?Math.min(w,h*selected.width/selected.height):Math.min(h,w*selected.height/selected.width))*factor).toFixed(1);}
+  $('remove-crop-overlay').hidden=!selected.crop;
+  $('overlay-size-help').textContent=selected.crop?'幅・高さは別々に変更できます。枠の中の画像は縦横比を保ちます。':'幅・高さは連動します。';
+  for(const id of ['cutout-overlay','restore-overlay','save-overlay-png','crop-overlay','remove-crop-overlay'])$(id).disabled=loading;
+  for(const key of ['x','y','width','height']){const el=$('overlay-'+key);el.value=+(selected[key]*factor).toFixed(1);el.min=key==='x'||key==='y'?0:.1;el.max=+((selected.crop&&(key==='width'||key==='height')?(key==='width'?w:h):key==='x'?w-selected.width:key==='y'?h-selected.height:key==='width'?Math.min(w,h*selected.width/selected.height):Math.min(h,w*selected.height/selected.width))*factor).toFixed(1);}
   $('overlay-opacity').value=selected.opacity;$('overlay-opacity-value').value=selected.opacity+'%';$('overlay-placement').value=selected.placement;
   const index=items().indexOf(selected);$('overlay-backward').disabled=index===0;$('overlay-forward').disabled=index===items().length-1;
  }
+ $('crop-overlay').onclick=async()=>{
+  const item=active(),state=getState();if(!item||loading)return;
+  const [w,h]=dimensions(state),factor=layoutFactor();
+  try{const result=await openCrop({src:item.src,crop:item.crop,width:item.width,height:item.height,max:{width:w,height:h},factor,unit:state.pageSize&&state.pageSize!=='a4'?'px':'mm'});if(!result||getState()!==state||!items().includes(item))return;commit(()=>Object.assign(item,result,imageBounds(state,{...item,...result})));toast('トリミングを適用しました。あとから調整できます。');}catch(error){toast(error.message);}
+ };
+ $('remove-crop-overlay').onclick=()=>{const item=active(),image=item&&getImages().get(item.src);if(!item?.crop||!image)return;commit(()=>{delete item.crop;Object.assign(item,imageBounds(getState(),{...item,height:item.width*image.height/image.width}));});};
  async function replaceSource(item,state,src,settings){
   const image=await decodeImage(src);if(getState()!==state||!items().includes(item))return;
   const replacement={...item,src};
@@ -83,7 +94,7 @@ export function createOverlayEditor({getState,getImages,getTab,remember,changed,
   try{const result=await openCutout(item.originalSrc||item.src,item.cutoutSettings);if(!result||getState()!==state||!items().includes(item))return;loading=true;sync();await replaceSource(item,state,result.src,result.settings);toast('背景を切り抜きました。元画像への復元もできます。');}catch(error){toast(error.message);}finally{loading=false;sync();}
  };
  $('restore-overlay').onclick=async()=>{const item=active(),state=getState();if(!item?.originalSrc||loading)return;loading=true;sync();try{await replaceSource(item,state,item.originalSrc);toast('元画像に戻しました。');}catch(error){toast(error.message);}finally{loading=false;sync();}};
- $('save-overlay-png').onclick=async()=>{const item=active();if(!item||loading)return;loading=true;sync();try{const image=getImages().get(item.src)||await decodeImage(item.src),canvas=document.createElement('canvas');canvas.width=image.naturalWidth;canvas.height=image.naturalHeight;canvas.getContext('2d').drawImage(image,0,0);const blob=await new Promise(resolve=>canvas.toBlob(resolve,'image/png'));if(!blob)throw new Error('PNGを保存できませんでした。');saveImage(blob);}catch(error){toast(error.message);}finally{loading=false;sync();}};
+ $('save-overlay-png').onclick=async()=>{const item=active();if(!item||loading)return;loading=true;sync();try{const image=getImages().get(item.src)||await decodeImage(item.src),canvas=overlayPNGCanvas(image,item);const blob=await new Promise(resolve=>canvas.toBlob(resolve,'image/png'));if(!blob)throw new Error('PNGを保存できませんでした。');saveImage(blob);}catch(error){toast(error.message);}finally{loading=false;sync();}};
  $('overlay-select').onchange=e=>select(e.target.value);
  $('add-overlay').onclick=()=>$('overlay-file').click();
  $('overlay-file').onchange=e=>{const file=e.target.files[0];e.target.value='';if(file)importFile(file);};
@@ -145,7 +156,7 @@ export function createOverlayEditor({getState,getImages,getTab,remember,changed,
   const item=active(),value=Number(el.value)/layoutFactor(),key=el.dataset.overlayValue;
   if(!item||el.value===''||!Number.isFinite(value)||value<0||(['width','height'].includes(key)&&value<=0)){sync();return;}
   const next={...item,[key]:value};
-  if(key==='width')next.height=value*item.height/item.width;if(key==='height')next.width=value*item.width/item.height;
+  if(!item.crop){if(key==='width')next.height=value*item.height/item.width;if(key==='height')next.width=value*item.width/item.height;}
   commit(()=>Object.assign(item,imageBounds(getState(),next)));
  });
  $('center-overlay').onclick=()=>{const item=active();if(!item)return;commit(()=>{const [w,h]=dimensions(getState());item.x=(w-item.width)/2;item.y=(h-item.height)/2;});};

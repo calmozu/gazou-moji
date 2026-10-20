@@ -1,3 +1,4 @@
+import {drawOverlayImage,validCrop} from './crop-image.js';
 import {validCutout,imageSourceBudget} from './cutout-settings.js';
 import { backlightDefaults, drawBacklights, validBacklight } from './backlight.js';
 import { paperFillDefaults, paintPaper, validPaperFill } from './paper-fill.js';
@@ -75,7 +76,7 @@ export function render(canvas, state, image, { dpi = 120, overlayImages = new Ma
       if(item.placement!==placement)continue;
       const img=overlayImages.get(item.src);if(!img)continue;
       const b=imageBounds(state,item);ctx.save();ctx.globalAlpha=item.opacity/100;
-      ctx.drawImage(img,b.x,b.y,b.width,b.height);ctx.restore();
+      drawOverlayImage(ctx,img,b,item.crop);ctx.restore();
     }
   }
   drawImages('back');
@@ -191,6 +192,7 @@ export function validateProject(value) {
       if(!item||typeof item.id!=='string'||item.id.length>80||ids.has(item.id)||typeof item.name!=='string'||item.name.length>150||typeof item.src!=='string'||item.src.length>12000000||!/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(item.src)||!num(item.opacity,0,100)||!['front','back'].includes(item.placement)||!num(item.x,0,w)||!num(item.y,0,h)||!num(item.width,.1,w)||!num(item.height,.1,h)||item.x+item.width>w+.0001||item.y+item.height>h+.0001)throw new Error('重ねる画像の設定を読み込めません。');
       if(item.originalSrc!=null&&(typeof item.originalSrc!=='string'||item.originalSrc.length>12000000||!/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(item.originalSrc)))throw new Error('元画像を読み込めません。');
       if(item.cutoutSettings!=null&&(!item.originalSrc||!validCutout(item.cutoutSettings)))throw new Error('切り抜き設定を読み込めません。');
+      if(item.crop!=null&&!validCrop(item.crop))throw new Error('トリミング設定を読み込めません。');
       ids.add(item.id);
     }
     if(imageSourceBudget(s.overlays)>30000000)throw new Error('重ねる画像の合計サイズが大きすぎます。');
