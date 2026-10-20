@@ -150,7 +150,7 @@ test('moved text is at its new coordinates in real PNG export; editor frame is n
   await page.locator('#export-format').selectOption('pdf');const pdfEvent=page.waitForEvent('download');await page.locator('#confirm-export').click();await (await pdfEvent).saveAs(info.outputPath('moved.pdf'));
 });
 
-for(const [preset,width,height] of [['youtube',1920,1080],['short',1080,1920],['short-mini',360,640]]){
+for(const [preset,width,height] of [['youtube',1920,1080],['short',1080,1920],['short-mini',640,360]]){
   test(`${preset} produces exact PNG size and matching PDF aspect; selection persists`,async({page},info)=>{
     await ready(page);await page.locator('#text').fill('春の便り');await background(page);await page.locator('#tab-page').click();await page.locator('#page-size').selectOption(preset);
     await expect(page.locator('#page-meta')).toContainText(`${width} × ${height} px`);await expect(page.locator('#page-orientation')).toBeHidden();
@@ -170,12 +170,12 @@ for(const [preset,width,height] of [['youtube',1920,1080],['short',1080,1920],['
   });
 }
 
-test('short mini keeps the short composition and reduces both dimensions by three',async({page})=>{
-  await ready(page);await page.locator('#text').fill('春夏');await page.locator('#tab-page').click();await page.locator('#page-size').selectOption('short');
+test('short mini keeps the landscape composition and reduces both dimensions by three',async({page})=>{
+  await ready(page);await page.locator('#text').fill('春夏');await page.locator('#tab-page').click();await page.locator('#page-size').selectOption('youtube');
   const before=await project(page);await page.locator('#page-size').selectOption('short-mini');const after=await project(page);
   expect(after.textBox).toEqual(before.textBox);expect(after.styles).toEqual(before.styles);expect(after.background).toEqual(before.background);
   const result=await page.evaluate(async()=>{
-    const {render,initialState}=await import('/src/render.js');const s=initialState();s.text='春夏';s.pageSize='short';s.textBox={x:25,y:40,width:40,height:40};
+    const {render,initialState}=await import('/src/render.js');const s=initialState();s.text='春夏';s.pageSize='youtube';s.textBox={x:25,y:40,width:40,height:40};
     const canvas=document.createElement('canvas');
     function inkBounds(){const {width:w,height:h}=canvas,d=canvas.getContext('2d').getImageData(0,0,w,h).data;let left=w,top=h,right=0,bottom=0;for(let y=0;y<h;y++)for(let x=0;x<w;x++){const i=(y*w+x)*4;if(d[i]<180){left=Math.min(left,x);top=Math.min(top,y);right=Math.max(right,x);bottom=Math.max(bottom,y);}}return {w,h,left,top,right,bottom};}
     const fullLayout=render(canvas,s,null,{dpi:300}),full=inkBounds();s.pageSize='short-mini';const miniLayout=render(canvas,s,null,{dpi:300}),mini=inkBounds();return {full,mini,fullLayout,miniLayout};
@@ -188,4 +188,14 @@ test('legacy A4 files and invalid page presets are handled without losing work',
   await ready(page);const old=await project(page);delete old.pageSize;old.text='前の原稿';old.styles=[];
   await page.locator('#project-file').setInputFiles({name:'old.kasane',mimeType:'application/json',buffer:Buffer.from(JSON.stringify(old))});await page.locator('#tab-page').click();await expect(page.locator('#page-size')).toHaveValue('a4');await expect(page.locator('#page-meta')).toContainText('210 × 297 mm');
   old.pageSize='unknown';await page.locator('#project-file').setInputFiles({name:'bad.kasane',mimeType:'application/json',buffer:Buffer.from(JSON.stringify(old))});await expect(page.locator('#toast')).toContainText('原稿を開けません');await expect(page.locator('#text')).toHaveValue('前の原稿');
+});
+
+test('old portrait mini drafts migrate to landscape without losing text or resetting on reopen',async({page})=>{
+  await ready(page);const old=await project(page);delete old.pageLayoutVersion;
+  old.pageSize='short-mini';old.text='前のミニの原稿';old.styles=[];old.textBox={x:20,y:90,width:50,height:50};
+  await page.locator('#project-file').setInputFiles({name:'portrait-mini.kasane',mimeType:'application/json',buffer:Buffer.from(JSON.stringify(old))});
+  await expect(page.locator('#text')).toHaveValue(old.text);await expect(page.locator('#page-meta')).toContainText('640 × 360 px');
+  const migrated=await project(page);expect(migrated.pageLayoutVersion).toBe(2);expect(migrated.textBox.x).toBeCloseTo(20*1920/1080,4);expect(migrated.textBox.y).toBeCloseTo(90*1080/1920,4);expect(migrated.textBox.width).toBeCloseTo(50*1920/1080,4);expect(migrated.textBox.height).toBeCloseTo(50*1080/1920,4);
+  await expect(page.locator('#save-status')).toContainText('保存済み');await page.reload();await expect(page.locator('html')).toHaveAttribute('data-ready','true');expect((await project(page)).textBox).toEqual(migrated.textBox);
+  await page.locator('#project-file').setInputFiles({name:'landscape-mini.kasane',mimeType:'application/json',buffer:Buffer.from(JSON.stringify(migrated))});expect((await project(page)).textBox).toEqual(migrated.textBox);
 });
