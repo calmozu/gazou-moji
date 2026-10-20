@@ -1,3 +1,4 @@
+import { backlightDefaults, backlightPanel, backlightPresets, backlightInputs } from './backlight.js';
 import { paperPanel, paperFillDefaults, paintPaper } from './paper-fill.js';
 import { effectDefaults, textEffectPresets, effectPanel, effectInputs } from './text-effects.js';
 import { colorPresets, presetCSS, gradientDirections, resolvedGradientDirection } from './presets.js';
@@ -57,6 +58,7 @@ document.querySelector('#app').innerHTML = `
    <p id="wide-rainbow-hint" class="hint" hidden>文字全体で虹色がつながります。縦・横・斜めから方向を選べます。</p>
   </div>
 ${effectPanel}
+${backlightPanel}
   <div class="section"><h2>文字の並べ方</h2>
    <div class="segmented" role="group" aria-label="文字揃え"><button data-align="left" class="active">左揃え</button><button data-align="center">中央</button><button data-align="right">右揃え</button></div>
    <label class="check"><input type="checkbox" id="vertical">縦書きにする</label>
@@ -190,7 +192,7 @@ async function draw(){
   $('char-count').textContent=`${textLayers(state).reduce((sum,t)=>sum+[...t.text].length,0).toLocaleString()} 文字`;
   fitPaper();
 }
-function activeStyle(){ return {...effectDefaults,...layer().style,...(selection[0]!==selection[1]?layer().styles[selection[0]]:null)}; }
+function activeStyle(){ return {...backlightDefaults,...effectDefaults,...layer().style,...(selection[0]!==selection[1]?layer().styles[selection[0]]:null)}; }
 function selectionInfo(){ const [a,b]=selection; $('selection-info').textContent=a!==b?`${b-a} 文字を選択中 · 設定は選択範囲に反映します`:'選択なし · 設定は文字全体に反映します'; }
 function syncControls(){
   if(activeTextBox===1&&!state.secondTextBox)activeTextBox=0;
@@ -205,7 +207,7 @@ function syncControls(){
   $('text-box-other').hidden=tab!=='text'||!state.secondTextBox;
   const s=activeStyle();
   for(const [id,v] of Object.entries({family:s.family,size:s.size,color:s.color,'glow-color':s.glowColor,'glow-size':s.glowSize,fit:state.background.fit,opacity:state.background.opacity,zoom:state.background.zoom,'image-x':state.background.x,'image-y':state.background.y,'line-height':layer().lineHeight,'paper-color':state.paper,title:state.title})) $(id).value=v;
-  for(const [id,key] of Object.entries(effectInputs)){const el=$(id);if(el.type==='checkbox')el.checked=s[key];else el.value=s[key];if($(id+'-value'))$(id+'-value').value=`${s[key]} mm`;}
+  for(const [id,key] of Object.entries({...effectInputs,...backlightInputs})){const el=$(id);if(el.type==='checkbox')el.checked=s[key];else el.value=s[key];if($(id+'-value'))$(id+'-value').value=key==='backlightStrength'?`${s[key]}%`:key==='backlightSpread'?`${Math.round(s[key]*100)}%`:`${s[key]} mm`;}
   const fill={...paperFillDefaults,...state.paperFill};
   document.querySelectorAll('[data-paper-mode]').forEach(button=>{const active=button.dataset.paperMode===fill.mode;button.classList.toggle('active',active);button.setAttribute('aria-pressed',active);});
   $('paper-solid-controls').hidden=fill.mode!=='solid';$('paper-gradient-controls').hidden=fill.mode!=='gradient';$('background-color').value=state.paper;$('paper-palette').value=fill.preset;$('paper-pattern').value=fill.pattern;$('paper-reverse').checked=fill.reverse;
@@ -270,14 +272,16 @@ text.addEventListener('input',()=>{
 });
 for(const [id,key] of [['family','family'],['glow-color','glowColor']]) $(id).addEventListener('change',e=>applyStyle({[key]:e.target.value}));
 $('text-effect-preset').onchange=e=>{const preset=textEffectPresets[e.target.value];if(preset)applyStyle(preset.style);e.target.value='';};
-for(const [id,key] of Object.entries(effectInputs)){
+for(const [id,key] of Object.entries({...effectInputs,...backlightInputs})){
   const el=$(id);
   if(el.type==='range'){
     el.addEventListener('pointerdown',()=>remember());el.addEventListener('keydown',e=>{if(['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Home','End'].includes(e.key))remember();});
     el.oninput=e=>applyStyle({[key]:Number(e.target.value)},{record:false});
   }else el.onchange=e=>applyStyle({[key]:el.type==='checkbox'?el.checked:el.value,...(key==='doubleOutline'&&el.checked?{outline:true}:{})});
 }
-$('clear-text-effects').onclick=()=>applyStyle({outline:false,doubleOutline:false,shadow:false,glow:false});
+$('clear-text-effects').onclick=()=>applyStyle({outline:false,doubleOutline:false,shadow:false,glow:false,backlight:false});
+$('backlight-preset').onchange=e=>{const preset=backlightPresets[e.target.value];if(preset)applyStyle(preset.style);e.target.value='';};
+$('remove-backlight').onclick=()=>applyStyle({backlight:false});
 $('color').onchange=e=>applyStyle({color:e.target.value,fillPreset:'solid'});
 $('fill-preset').onchange=e=>applyStyle({fillPreset:e.target.value});
 $('gradient-direction').onchange=e=>applyStyle({gradientDirection:e.target.value});

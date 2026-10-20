@@ -23,7 +23,7 @@ export const effectPanel=`
  <label class="check"><input id="text-shadow" type="checkbox">文字に影をつける</label>
  <div class="row"><label for="text-shadow-color" class="label">影の色</label><input id="text-shadow-color" class="color-input" type="color" aria-label="文字の影の色"></div>
  ${[['shadow-x','影の左右位置',-5,5,.1],['shadow-y','影の上下位置',-5,5,.1],['shadow-blur','影のぼかし',0,5,.1]].map(([id,label,min,max,step])=>`<label class="range-label" for="${id}"><span>${label}</span><output id="${id}-value"></output></label><input id="${id}" type="range" min="${min}" max="${max}" step="${step}">`).join('')}
- <button id="clear-text-effects">フチ・影・光彩をはずす</button>
+ <button id="clear-text-effects">フチ・影・光をはずす</button>
  </details>
 </div>`;
 export const effectInputs={'outline':'outline','double-outline':'doubleOutline','text-shadow':'shadow','outline-color':'outlineColor','outer-outline-color':'outerOutlineColor','text-shadow-color':'shadowColor','outline-width':'outlineWidth','outer-outline-width':'outerOutlineWidth','shadow-x':'shadowX','shadow-y':'shadowY','shadow-blur':'shadowBlur'};

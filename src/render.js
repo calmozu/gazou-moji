@@ -1,3 +1,4 @@
+import { backlightDefaults, drawBacklights, validBacklight } from './backlight.js';
 import { paperFillDefaults, paintPaper, validPaperFill } from './paper-fill.js';
 import { effectDefaults } from './text-effects.js';
 import { colorPresets, presetGradient, gradientDirections, resolvedGradientDirection, gradientPoints } from './presets.js';
@@ -14,7 +15,7 @@ export const families = {
   reggae: '"Reggae One", sans-serif',
 };
 export const familyLabels={sans:'角ゴシック',serif:'明朝',round:'丸ゴシック',textbook:'教科書風',handwriting:'手書き（よもぎ）',brush:'筆文字（佑字）',pop:'ポップ（はちまる）',heavy:'極太ゴシック',decorative:'飾り明朝',reggae:'個性派（レゲエ）'};
-export const baseStyle = { ...effectDefaults, family: 'sans', size: 24, bold: false, color: '#252923', fillPreset:'solid', gradientDirection:'auto', glow: false, glowColor: '#ffffff', glowSize: 1.5 };
+export const baseStyle = { ...backlightDefaults, ...effectDefaults, family: 'sans', size: 24, bold: false, color: '#252923', fillPreset:'solid', gradientDirection:'auto', glow: false, glowColor: '#ffffff', glowSize: 1.5 };
 export const pageFormats={
   a4: {label:'A4'},
   youtube: {label:'YouTube 横動画',pixels:[1920,1080]},
@@ -95,14 +96,14 @@ function drawText(ctx,state,scale) {
   if (line.length || state.text.endsWith('\n')) finish();
   let cross = state.vertical ? box.x+box.width : box.y, overflow = false;
   const placements = [];
-  for (const l of lines) {
+  for (const [lineIndex,l] of lines.entries()) {
     const extent = l.size*state.lineHeight;
     if (state.vertical ? cross-l.size < box.x-.0001 : cross+l.size > box.y+box.height+.0001) { overflow = true; break; }
     let along = (state.vertical ? box.y : box.x) + (state.align === 'center' ? (maxLength-l.length)/2 : state.align === 'right' ? maxLength-l.length : 0);
     if (l.length>maxLength+.0001) overflow=true;
     for (const g of l.glyphs) {
       const x = state.vertical ? cross-l.size/2 : along+g.offset, y = state.vertical ? along+g.offset+g.size/2 : cross+l.size*.88;
-      placements.push({ ...g,x,y });
+      placements.push({ ...g,x,y,line:lineIndex });
     }
     cross += state.vertical ? -extent : extent;
   }
@@ -123,11 +124,12 @@ function drawText(ctx,state,scale) {
   }
   // Paint each whole layer in passes so neighbouring outlines never cover a fill.
   const withGlyph=(g,paint)=>{
-    const style={...effectDefaults,...g.style};ctx.save();font(ctx,style);ctx.translate(g.x,g.y);
+    const style={...backlightDefaults,...effectDefaults,...g.style};ctx.save();font(ctx,style);ctx.translate(g.x,g.y);
     if(state.vertical){ctx.textAlign='center';ctx.textBaseline='middle';if(/^[\u0020-\u007eー〜…―—（）［］「」『』【】]$/u.test(g.char))ctx.rotate(Math.PI/2);else if(/^[、。，．]$/u.test(g.char))ctx.translate(g.size*.28,-g.size*.28);}
     else{ctx.textAlign='left';ctx.textBaseline='alphabetic';}
     ctx.lineJoin='round';paint(style);ctx.restore();
   };
+  drawBacklights(ctx,placements,{withGlyph,scale});
   const width=s=>s.outline?s.outlineWidth+(s.doubleOutline?s.outerOutlineWidth:0):0;
   for(const g of placements)withGlyph(g,s=>{
     if(!s.shadow)return;
@@ -164,7 +166,7 @@ export function validateProject(value) {
   const num=(v,a,b)=>typeof v==='number' && Number.isFinite(v) && v>=a && v<=b;
   const color=v=>typeof v==='string' && /^#[0-9a-f]{6}$/i.test(v);
   const validEffects=v=>['outline','doubleOutline','shadow'].every(k=>v[k]==null||typeof v[k]==='boolean')&&['outlineColor','outerOutlineColor','shadowColor'].every(k=>v[k]==null||color(v[k]))&&['outlineWidth','outerOutlineWidth'].every(k=>v[k]==null||num(v[k],.1,4))&&['shadowX','shadowY'].every(k=>v[k]==null||num(v[k],-5,5))&&(v.shadowBlur==null||num(v.shadowBlur,0,5));
-  const validStyle=v=>v && validEffects(v) && (v.gradientDirection==null||v.gradientDirection==='auto'||Object.hasOwn(gradientDirections,v.gradientDirection)) && (v.fillPreset==null||v.fillPreset==='solid'||Object.hasOwn(colorPresets,v.fillPreset)) && Object.hasOwn(families,v.family) && num(v.size,6,200) && typeof v.bold==='boolean' && color(v.color) && typeof v.glow==='boolean' && color(v.glowColor) && num(v.glowSize,0.2,6);
+  const validStyle=v=>v && validBacklight(v) && validEffects(v) && (v.gradientDirection==null||v.gradientDirection==='auto'||Object.hasOwn(gradientDirections,v.gradientDirection)) && (v.fillPreset==null||v.fillPreset==='solid'||Object.hasOwn(colorPresets,v.fillPreset)) && Object.hasOwn(families,v.family) && num(v.size,6,200) && typeof v.bold==='boolean' && color(v.color) && typeof v.glow==='boolean' && color(v.glowColor) && num(v.glowSize,0.2,6);
   if (!s || s.version!==1 || typeof s.title!=='string' || s.title.length>100 || typeof s.text!=='string' || s.text.length>30000 || !['portrait','landscape'].includes(s.orientation) || typeof s.vertical!=='boolean' || !['left','center','right'].includes(s.align) || !num(s.lineHeight,1,3) || !color(s.paper) || !validStyle(s.style) || !Array.isArray(s.styles) || s.styles.length>s.text.length || !s.styles.every(v=>v===null || validStyle(v)) || !s.margins || !['top','right','bottom','left'].every(k=>num(s.margins[k],0,70))) throw new Error('対応していない原稿ファイルです。');
   if (s.letterSpacing!=null && !num(s.letterSpacing,-.5,.5)) throw new Error('文字間隔を読み込めません。');
   if (s.pageSize!=null && !Object.hasOwn(pageFormats,s.pageSize)) throw new Error('対応していない用紙サイズです。');
