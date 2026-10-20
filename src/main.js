@@ -120,7 +120,7 @@ ${overlayPanel}
 
 let state=initialState(), image=null, tab='text', selection=[0,0], history=[], future=[], saveTimer, toastTimer, composing=false, overflow=false;
 let activeTextBox=0,overlayImages=new Map();
-const overlayEditor=createOverlayEditor({getState:()=>state,getImages:()=>overlayImages,getTab:()=>tab,remember,changed,toast,readDataURL,decodeImage,layoutFactor});
+const overlayEditor=createOverlayEditor({getState:()=>state,getImages:()=>overlayImages,getTab:()=>tab,remember,changed,toast,readDataURL,decodeImage,layoutFactor,onAdded:()=>setTab('overlay')});
 async function prepareOverlays(next){return new Map(await Promise.all((next.overlays||[]).map(async item=>[item.src,overlayImages.get(item.src)||await decodeImage(item.src)])));}
 let fontReady=Promise.resolve(), fontKey='', drawing=0, hasBooted=false;
 const canvas=$('canvas'), text=$('text');

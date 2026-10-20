@@ -11,3 +11,5 @@
 .preset-field{margin-top:16px}.preset-preview{display:flex;justify-content:center;background:#eaece5;border:1px solid var(--line);border-radius:7px;padding:6px 12px;margin-top:10px}.preset-preview span{font-size:30px;line-height:1.5;font-weight:700;color:transparent;background-clip:text;-webkit-background-clip:text}
 
 #text-effect-details summary{cursor:pointer;color:var(--green);padding:10px 0;font-size:12px}#text-effect-details[open] summary{margin-bottom:10px}
+
+.clipboard-paste{width:100%;margin-top:10px;font-size:12px}

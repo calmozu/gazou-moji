@@ -5,9 +5,11 @@ export const overlayPanel=`
 <div id="panel-overlay" class="panel" role="tabpanel" aria-labelledby="tab-overlay" hidden>
  <div class="section"><p class="eyebrow">IMAGES</p><h2>画像を、自由に重ねる。</h2>
   <button id="add-overlay" class="upload">＋ PNG・SVG・画像を追加</button>
+  <button id="paste-overlay" class="clipboard-paste">クリップボードから貼り付け</button>
+  <p class="hint">コピーした画像は Ctrl＋V（Macは ⌘＋V）でも、1枚ごとに新しい画像レイヤーとして追加できます。</p>
   <input id="overlay-file" type="file" accept="image/png,image/svg+xml,image/jpeg,image/webp,.svg" hidden>
   <p class="hint">PNG・SVGのロゴやイラストを重ねられます。SVGは透明な1枚の画像として読み込みます。最大12枚。画像はこのブラウザー内で処理します。</p>
-  <label id="overlay-select-field" class="field" hidden><span class="label">編集する画像</span><select id="overlay-select"></select></label>
+  <label id="overlay-select-field" class="field" hidden><span class="label">編集する画像レイヤー</span><select id="overlay-select"></select></label>
  </div>
  <div id="overlay-controls" hidden>
   <div class="section"><h2>位置と大きさ</h2><p class="hint" id="overlay-help">用紙上の青い枠をドラッグして移動。四隅の丸で縦横比を保って大きさを変えられます。</p>
@@ -23,7 +25,7 @@ export const overlayPanel=`
  </div>
 </div>`;
 
-export function createOverlayEditor({getState,getImages,getTab,remember,changed,toast,readDataURL,decodeImage,layoutFactor}){
+export function createOverlayEditor({getState,getImages,getTab,remember,changed,toast,readDataURL,decodeImage,layoutFactor,onAdded}){
  const $=id=>document.getElementById(id),host=document.createElement('div');host.id='image-frames';$('paper-wrap').append(host);
  let selectedId=null,gesture=null,listKey='',loading=false;
  const items=()=>getState().overlays || [],active=()=>items().find(item=>item.id===selectedId);
@@ -32,7 +34,7 @@ export function createOverlayEditor({getState,getImages,getTab,remember,changed,
  function sync(){
   if(!active())selectedId=items().at(-1)?.id||null;
   const selected=active(),state=getState(),factor=layoutFactor(),[w,h]=dimensions(state);
-  $('overlay-controls').hidden=!selected;$('overlay-select-field').hidden=!selected;host.hidden=getTab()!=='overlay';$('add-overlay').disabled=loading||items().length>=12;
+  $('overlay-controls').hidden=!selected;$('overlay-select-field').hidden=!selected;host.hidden=getTab()!=='overlay';$('add-overlay').disabled=loading||items().length>=12;$('paste-overlay').disabled=loading||items().length>=12;
   const key=JSON.stringify(items().map(item=>[item.id,item.name]));
   if(key!==listKey){$('overlay-select').replaceChildren(...items().map((item,i)=>{const option=document.createElement('option');option.value=item.id;option.textContent=`${i+1}. ${item.name}`;return option;}));listKey=key;}
   $('overlay-select').value=selectedId||'';
@@ -65,13 +67,14 @@ export function createOverlayEditor({getState,getImages,getTab,remember,changed,
  }
  $('overlay-select').onchange=e=>select(e.target.value);
  $('add-overlay').onclick=()=>$('overlay-file').click();
- $('overlay-file').onchange=async e=>{
-  const file=e.target.files[0];e.target.value='';if(!file)return;
+ $('overlay-file').onchange=e=>{const file=e.target.files[0];e.target.value='';if(file)importFile(file);};
+ async function importFile(file){
+  if(loading){toast('画像を読み込み中です。少し待ってから貼り付けてください。');return false;}
   const isSVG=file.type==='image/svg+xml'||/\.svg$/i.test(file.name);
   if(!isSVG&&!['image/png','image/jpeg','image/webp'].includes(file.type)){toast('PNG・SVG・JPEG・WebP形式の画像を選んでください。');return;}
   if(file.size>40000000){toast('画像が大きすぎます。40 MB以下の画像を選んでください。');return;}
-  const state=getState();if(items().length>=12)return;
-  loading=true;$('add-overlay').disabled=true;
+  const state=getState();if(items().length>=12){toast('重ねる画像は最大12枚です。不要な画像を削除してから追加してください。');return false;}
+  loading=true;$('add-overlay').disabled=true;$('paste-overlay').disabled=true;
   try{
    const original=await decodeImage(isSVG?await svgImageSource(file):await readDataURL(file)),ratio=Math.min(1,2048/Math.max(original.naturalWidth,original.naturalHeight));
    const canvas=document.createElement('canvas');canvas.width=Math.max(1,Math.round(original.naturalWidth*ratio));canvas.height=Math.max(1,Math.round(original.naturalHeight*ratio));canvas.getContext('2d').drawImage(original,0,0,canvas.width,canvas.height);
@@ -80,8 +83,44 @@ export function createOverlayEditor({getState,getImages,getTab,remember,changed,
    const image=await decodeImage(src);if(getState()!==state)return;
    const [w,h]=dimensions(state),scale=Math.min(w*.5/image.naturalWidth,h*.5/image.naturalHeight),width=image.naturalWidth*scale,height=image.naturalHeight*scale;
    const item={id:crypto.randomUUID(),name:file.name.slice(0,150),src,x:(w-width)/2,y:(h-height)/2,width,height,opacity:100,placement:'front'};
-   Object.assign(item,imageBounds(state,item));remember();state.overlays ||= [];state.overlays.push(item);getImages().set(src,image);selectedId=item.id;changed();
-  }catch(error){toast(error.message);}finally{loading=false;sync();}
+   Object.assign(item,imageBounds(state,item));remember();state.overlays ||= [];state.overlays.push(item);getImages().set(src,image);selectedId=item.id;changed();onAdded?.();return true;
+  }catch(error){toast(error.message);return false;}finally{loading=false;sync();}
+ }
+ const imageType=type=>['image/png','image/jpeg','image/webp','image/svg+xml'].includes(type);
+ let readingClipboard=false;
+ function clipboardFile(blob,index){
+  const now=new Date(),pad=n=>String(n).padStart(2,'0'),stamp=`${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}_${pad(now.getHours())}-${pad(now.getMinutes())}-${pad(now.getSeconds())}`;
+  const extension={'image/png':'png','image/jpeg':'jpg','image/webp':'webp','image/svg+xml':'svg'}[blob.type];
+  return new File([blob],`貼り付け画像_${stamp}_${index+1}.${extension}`,{type:blob.type});
+ }
+ async function pasteFiles(files){
+  if(document.querySelector('dialog[open]'))return;
+  if(readingClipboard){toast('画像を読み込み中です。少し待ってから貼り付けてください。');return;}
+  readingClipboard=true;const state=getState();
+  try{for(const [i,file] of files.entries()){if(getState()!==state)break;if(!await importFile(clipboardFile(file,i)))break;}}finally{readingClipboard=false;}
+ }
+ document.addEventListener('paste',e=>{
+  if(e.defaultPrevented||document.querySelector('dialog[open]'))return;
+  const data=e.clipboardData;if(!data)return;
+  // Some apps put both an image and text on the clipboard. Text fields keep
+  // their usual text paste; an image-only clipboard can be pasted anywhere.
+  if(data.getData('text/plain')&&e.target instanceof Element&&e.target.closest('input,textarea,[contenteditable="true"]'))return;
+  const files=[...data.items].filter(item=>item.kind==='file'&&imageType(item.type)).map(item=>item.getAsFile()).filter(Boolean);
+  if(!files.length)files.push(...[...data.files].filter(file=>imageType(file.type)));
+  if(!files.length)return;e.preventDefault();void pasteFiles(files);
+ });
+ $('paste-overlay').onclick=async()=>{
+  if(readingClipboard||loading)return;
+  if(!navigator.clipboard?.read){toast('このブラウザーでは画像をコピーして、Ctrl＋V（Macは ⌘＋V）で貼り付けてください。');return;}
+  const state=getState();$('paste-overlay').disabled=true;
+  try{
+   const clipboard=await navigator.clipboard.read(),files=[];
+   for(const item of clipboard){const type=item.types.find(imageType);if(type)files.push(await item.getType(type));}
+   if(getState()!==state)return;
+   if(!files.length){toast('クリップボードに画像がありません。画像をコピーしてから貼り付けてください。');return;}
+   await pasteFiles(files);
+  }catch{toast('貼り付けを許可するか、画像をコピーしてCtrl＋V（Macは ⌘＋V）で貼り付けてください。');}
+  finally{sync();}
  };
  document.querySelectorAll('[data-overlay-value]').forEach(el=>el.onchange=()=>{
   const item=active(),value=Number(el.value)/layoutFactor(),key=el.dataset.overlayValue;

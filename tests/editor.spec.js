@@ -459,3 +459,37 @@ test('SVG gradients, large dimensions, local symbols and invalid files are handl
   await uploadSVG(page,'<svg>broken','bad.svg');await expect(page.locator('#toast')).toContainText('SVGファイルを読み込めません');expect((await project(page)).overlays).toEqual(s.overlays);
   await uploadSVG(page,'<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100"><foreignObject/></svg>','html.svg');await expect(page.locator('#toast')).toContainText('HTMLを含むSVG');expect((await project(page)).overlays).toEqual(s.overlays);
 });
+
+async function writeClipboardImage(page){
+  await page.context().grantPermissions(['clipboard-read','clipboard-write']);
+  await page.evaluate(async()=>{const c=document.createElement('canvas');c.width=200;c.height=100;const ctx=c.getContext('2d');ctx.fillStyle='#0044cc';ctx.fillRect(50,25,100,50);const blob=await new Promise(resolve=>c.toBlob(resolve,'image/png'));await navigator.clipboard.write([new ClipboardItem({'image/png':blob})]);});
+}
+
+test.describe('clipboard images',()=>{
+ test.describe.configure({mode:'serial'});
+test('native Ctrl+V pastes a transparent clipboard image from text editing, with undo and persistence',async({page})=>{
+  await ready(page);await page.locator('#text').fill('文字は残す');await writeClipboardImage(page);await page.locator('#text').focus();await page.keyboard.press('Control+v');await expect(page.locator('#overlay-select')).toContainText('貼り付け画像_');await expect(page.locator('#tab-overlay')).toHaveAttribute('aria-selected','true');
+  const pasted=await project(page);expect(pasted.text).toBe('文字は残す');expect(pasted.overlays).toHaveLength(1);expect(pasted.overlays[0].name).toMatch(/^貼り付け画像_\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}_1\.png$/);
+  const pixels=await page.evaluate(async src=>{const image=new Image();image.src=src;await image.decode();const c=document.createElement('canvas');c.width=image.width;c.height=image.height;const ctx=c.getContext('2d');ctx.drawImage(image,0,0);return {size:[c.width,c.height],outside:[...ctx.getImageData(5,5,1,1).data],inside:[...ctx.getImageData(100,50,1,1).data]};},pasted.overlays[0].src);expect(pixels).toEqual({size:[200,100],outside:[0,0,0,0],inside:[0,68,204,255]});
+  await page.locator('#undo').click();expect((await project(page)).overlays).toHaveLength(0);await page.locator('#redo').click();expect((await project(page)).overlays).toEqual(pasted.overlays);
+  await overlayValue(page,'width',80);const resized=await project(page);await expect(page.locator('#save-status')).toContainText('保存済み');await page.reload();await expect(page.locator('html')).toHaveAttribute('data-ready','true');expect((await project(page)).overlays).toEqual(resized.overlays);
+});
+
+test('clipboard paste button imports real clipboard pixels into PNG and PDF export',async({page},info)=>{
+  await ready(page);await page.locator('#tab-page').click();await page.locator('#page-size').selectOption('short-mini');await writeClipboardImage(page);await page.locator('#tab-overlay').click();await page.locator('#paste-overlay').click();await expect(page.locator('#overlay-select')).toContainText('貼り付け画像_');await overlayValue(page,'width',240);await overlayValue(page,'x',100);await overlayValue(page,'y',80);
+  await page.locator('#export-button').click();let event=page.waitForEvent('download');await page.locator('#confirm-export').click();let file=await event;await file.saveAs(info.outputPath('clipboard.png'));const data=await fs.readFile(await file.path());const pixels=await page.evaluate(async data=>{const image=new Image();image.src='data:image/png;base64,'+data;await image.decode();const c=document.createElement('canvas');c.width=image.width;c.height=image.height;const ctx=c.getContext('2d');ctx.drawImage(image,0,0);return {size:[c.width,c.height],outside:[...ctx.getImageData(110,90,1,1).data],inside:[...ctx.getImageData(220,140,1,1).data]};},data.toString('base64'));expect(pixels).toEqual({size:[640,360],outside:[255,255,255,255],inside:[0,68,204,255]});
+  await page.locator('#export-format').selectOption('pdf');event=page.waitForEvent('download');await page.locator('#confirm-export').click();file=await event;await file.saveAs(info.outputPath('clipboard.pdf'));
+});
+
+test('normal text paste is unchanged and mixed clipboard contents prefer text inside text fields',async({page})=>{
+  await ready(page);await page.context().grantPermissions(['clipboard-read','clipboard-write']);await page.evaluate(()=>navigator.clipboard.writeText('貼り付けた文字'));await page.locator('#text').focus();await page.keyboard.press('Control+v');await expect(page.locator('#text')).toHaveValue('貼り付けた文字');expect((await project(page)).overlays).toHaveLength(0);
+  const cancelled=await page.locator('#text').evaluate(el=>{const data=new DataTransfer();data.setData('text/plain','文字と画像');data.items.add(new File(['not decoded because text wins'],'image.png',{type:'image/png'}));return !el.dispatchEvent(new ClipboardEvent('paste',{clipboardData:data,bubbles:true,cancelable:true}));});expect(cancelled).toBe(false);expect((await project(page)).overlays).toHaveLength(0);
+});
+
+test('clipboard empty, denied and full-layer cases give a recovery path without losing work',async({page})=>{
+  await ready(page);await page.locator('#text').fill('残す原稿');await page.locator('#tab-overlay').click();await page.context().grantPermissions(['clipboard-read','clipboard-write']);await page.evaluate(()=>navigator.clipboard.writeText('画像ではない'));await page.locator('#paste-overlay').click();await expect(page.locator('#toast')).toContainText('クリップボードに画像がありません');
+  await page.evaluate(()=>Object.defineProperty(navigator.clipboard,'read',{configurable:true,value:()=>Promise.reject(new DOMException('Denied','NotAllowedError'))}));await page.locator('#paste-overlay').click();await expect(page.locator('#toast')).toContainText('Ctrl＋V');await expect(page.locator('#paste-overlay')).toBeEnabled();expect((await project(page)).text).toBe('残す原稿');
+  await overlayUpload(page);const full=await project(page),item=full.overlays[0];full.overlays=Array.from({length:12},(_,i)=>({...item,id:'limit-'+i}));await page.locator('#project-file').setInputFiles({name:'full.kasane',mimeType:'application/json',buffer:Buffer.from(JSON.stringify(full))});await expect(page.locator('#paste-overlay')).toBeDisabled();await writeClipboardImage(page);await page.locator('#tab-overlay').click();await page.keyboard.press('Control+v');await expect(page.locator('#toast')).toContainText('最大12枚');expect((await project(page)).overlays).toHaveLength(12);
+});
+
+});
