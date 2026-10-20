@@ -1,6 +1,6 @@
 import { paperPanel, paperFillDefaults, paintPaper } from './paper-fill.js';
 import { effectDefaults, textEffectPresets, effectPanel, effectInputs } from './text-effects.js';
-import { colorPresets, presetCSS } from './presets.js';
+import { colorPresets, presetCSS, gradientDirections, resolvedGradientDirection } from './presets.js';
 import '@fontsource/yomogi/400.css';
 import '@fontsource/yuji-syuku/400.css';
 import '@fontsource/hachi-maru-pop/400.css';
@@ -51,8 +51,10 @@ document.querySelector('#app').innerHTML = `
    <label class="label" for="size">文字サイズ</label><div class="size-buttons"><button id="smaller">小さく −</button><button id="larger">大きく ＋</button></div>
    <div class="row"><div class="number-unit"><input id="size" type="number" min="6" max="200" step="1" aria-label="文字サイズ"><span id="font-size-unit">pt</span></div><button id="bold" aria-pressed="false"><b>B</b> 太字</button><input class="color-input" id="color" type="color" aria-label="文字の色"></div>
    <label class="field preset-field"><span class="label">文字色のプリセット</span><select id="fill-preset"><option value="solid">単色（色を選ぶ）</option>${Object.entries(colorPresets).map(([key,preset])=>`<option value="${key}">${preset.label}</option>`).join('')}</select></label>
+   <label id="gradient-direction-field" class="field" hidden><span class="label">文字のグラデーションの方向</span><select id="gradient-direction">${Object.entries(gradientDirections).map(([key,label])=>`<option value="${key}">${label}</option>`).join('')}</select></label>
    <div id="preset-preview" class="preset-preview" aria-hidden="true" hidden><span>あ Aa</span></div>
    <p class="hint">文字を選ぶと、その部分だけに適用します。色を選び直すと単色に戻ります。</p>
+   <p id="wide-rainbow-hint" class="hint" hidden>文字全体で虹色がつながります。縦・横・斜めから方向を選べます。</p>
   </div>
 ${effectPanel}
   <div class="section"><h2>文字の並べ方</h2>
@@ -209,8 +211,9 @@ function syncControls(){
   $('paper-solid-controls').hidden=fill.mode!=='solid';$('paper-gradient-controls').hidden=fill.mode!=='gradient';$('background-color').value=state.paper;$('paper-palette').value=fill.preset;$('paper-pattern').value=fill.pattern;$('paper-reverse').checked=fill.reverse;
   document.querySelectorAll('[data-paper-color]').forEach(button=>button.setAttribute('aria-pressed',fill.mode==='solid'&&button.dataset.paperColor===state.paper));
   const previewKey=JSON.stringify([state.paper,fill]);if(previewKey!==paperPreviewKey){paperPreviewKey=previewKey;const preview=document.createElement('canvas');preview.width=256;preview.height=128;paintPaper(preview.getContext('2d'),state,256,128);$('paper-fill-preview').src=preview.toDataURL();}
-  $('fill-preset').value=s.fillPreset||'solid';
-  $('preset-preview').hidden=!Object.hasOwn(colorPresets,s.fillPreset||'');$('preset-preview').firstElementChild.style.backgroundImage=presetCSS(s.fillPreset);
+  $('fill-preset').value=s.fillPreset||'solid';$('wide-rainbow-hint').hidden=s.fillPreset!=='rainbow-wide';
+  const direction=resolvedGradientDirection(s,layer().vertical);$('gradient-direction-field').hidden=!Object.hasOwn(colorPresets,s.fillPreset||'');$('gradient-direction').value=direction;
+  $('preset-preview').hidden=!Object.hasOwn(colorPresets,s.fillPreset||'');$('preset-preview').firstElementChild.style.backgroundImage=presetCSS(s.fillPreset,direction);
   $('bold').setAttribute('aria-pressed',s.bold); $('bold').classList.toggle('active',s.bold); $('bold').style.background=s.bold?'#e4eddf':'';
   $('glow').checked=s.glow; $('vertical').checked=layer().vertical; $('vertical-hint').hidden=!layer().vertical;
   $('glow-size-value').value=s.glowSize; $('line-height-value').value=layer().lineHeight;
@@ -277,6 +280,7 @@ for(const [id,key] of Object.entries(effectInputs)){
 $('clear-text-effects').onclick=()=>applyStyle({outline:false,doubleOutline:false,shadow:false,glow:false});
 $('color').onchange=e=>applyStyle({color:e.target.value,fillPreset:'solid'});
 $('fill-preset').onchange=e=>applyStyle({fillPreset:e.target.value});
+$('gradient-direction').onchange=e=>applyStyle({gradientDirection:e.target.value});
 $('size').addEventListener('change',e=>{const v=Number(e.target.value)/fontSizeFactor();if(!Number.isFinite(v)||v<6||v>200){syncControls();return;}applyStyle({size:v});});
 $('size').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();e.target.blur();}});
 for(const [id,delta] of [['smaller',-2],['larger',2]]) $(id).onclick=()=>{

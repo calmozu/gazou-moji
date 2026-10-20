@@ -6,6 +6,7 @@ export const textEffectPresets={
  blue:{label:'青＋白黒の二重フチ',style:recipe({color:'#183db8',outline:true,outlineColor:'#ffffff',outlineWidth:.8,doubleOutline:true,outerOutlineColor:'#141414',outerOutlineWidth:.4,shadow:true})},
  pink:{label:'ピンク＋黒白の二重フチ',style:recipe({color:'#f25c9b',outline:true,outlineWidth:.5,doubleOutline:true,outerOutlineColor:'#ffffff',outerOutlineWidth:.7,shadow:true})},
  red:{label:'赤＋白フチ・光彩',style:recipe({color:'#d71920',outline:true,outlineColor:'#ffffff',outlineWidth:.5,glow:true,glowColor:'#ffffff',glowSize:1.5})},
+ rainbow:{label:'レインボー全体＋白黒の二重フチ',style:recipe({color:'#ff261d',fillPreset:'rainbow-wide',gradientDirection:'auto',outline:true,outlineColor:'#ffffff',outlineWidth:.35,doubleOutline:true,outerOutlineColor:'#141414',outerOutlineWidth:.5,shadow:true})},
  gold:{label:'ゴールド＋黒フチ・影',style:recipe({color:'#ba8b20',fillPreset:'gold',outline:true,outlineWidth:.5,shadow:true})},
 };
 export const effectPanel=`

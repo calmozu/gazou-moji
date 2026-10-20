@@ -1,6 +1,6 @@
 import { paperFillDefaults, paintPaper, validPaperFill } from './paper-fill.js';
 import { effectDefaults } from './text-effects.js';
-import { colorPresets, presetGradient } from './presets.js';
+import { colorPresets, presetGradient, gradientDirections, resolvedGradientDirection, gradientPoints } from './presets.js';
 export const families = {
   sans: '"Noto Sans JP", sans-serif',
   serif: '"Noto Serif JP", serif',
@@ -14,7 +14,7 @@ export const families = {
   reggae: '"Reggae One", sans-serif',
 };
 export const familyLabels={sans:'角ゴシック',serif:'明朝',round:'丸ゴシック',textbook:'教科書風',handwriting:'手書き（よもぎ）',brush:'筆文字（佑字）',pop:'ポップ（はちまる）',heavy:'極太ゴシック',decorative:'飾り明朝',reggae:'個性派（レゲエ）'};
-export const baseStyle = { ...effectDefaults, family: 'sans', size: 24, bold: false, color: '#252923', fillPreset:'solid', glow: false, glowColor: '#ffffff', glowSize: 1.5 };
+export const baseStyle = { ...effectDefaults, family: 'sans', size: 24, bold: false, color: '#252923', fillPreset:'solid', gradientDirection:'auto', glow: false, glowColor: '#ffffff', glowSize: 1.5 };
 export const pageFormats={
   a4: {label:'A4'},
   youtube: {label:'YouTube 横動画',pixels:[1920,1080]},
@@ -106,6 +106,21 @@ function drawText(ctx,state,scale) {
     }
     cross += state.vertical ? -extent : extent;
   }
+  // Anchor the continuous rainbow to the ink bounds of all the selected text.
+  const rainbowBounds={left:Infinity,top:Infinity,right:-Infinity,bottom:-Infinity};
+  for(const g of placements){
+    if(g.style.fillPreset!=='rainbow-wide'||!g.char.trim())continue;
+    font(ctx,g.style);const metrics=ctx.measureText(g.char);
+    rainbowBounds.left=Math.min(rainbowBounds.left,state.vertical?g.x-g.size/2:g.x-metrics.actualBoundingBoxLeft);
+    rainbowBounds.right=Math.max(rainbowBounds.right,state.vertical?g.x+g.size/2:g.x+metrics.actualBoundingBoxRight);
+    rainbowBounds.top=Math.min(rainbowBounds.top,state.vertical?g.y-g.size/2:g.y-metrics.actualBoundingBoxAscent);
+    rainbowBounds.bottom=Math.max(rainbowBounds.bottom,state.vertical?g.y+g.size/2:g.y+metrics.actualBoundingBoxDescent);
+  }
+  const rainbows=new Map();
+  if(Number.isFinite(rainbowBounds.left)){
+    rainbowBounds.right=Math.max(rainbowBounds.left+.001,rainbowBounds.right);rainbowBounds.bottom=Math.max(rainbowBounds.top+.001,rainbowBounds.bottom);
+    for(const direction of Object.keys(gradientDirections))rainbows.set(direction,gradientPoints(rainbowBounds,direction));
+  }
   // Paint each whole layer in passes so neighbouring outlines never cover a fill.
   const withGlyph=(g,paint)=>{
     const style={...effectDefaults,...g.style};ctx.save();font(ctx,style);ctx.translate(g.x,g.y);
@@ -131,8 +146,15 @@ function drawText(ctx,state,scale) {
     ctx.strokeStyle=outer?s.outerOutlineColor:s.outlineColor;ctx.lineWidth=2*(outer?width(s):s.outlineWidth);ctx.strokeText(g.char,0,0);
   });
   for(const g of placements)withGlyph(g,s=>{
-    const metrics=ctx.measureText(g.char),top=state.vertical?-g.size/2:-metrics.actualBoundingBoxAscent,bottom=state.vertical?g.size/2:metrics.actualBoundingBoxDescent;
-    ctx.fillStyle=presetGradient(ctx,s.fillPreset,0,top,0,Math.max(top+.001,bottom))||s.color;ctx.fillText(g.char,0,0);
+    const metrics=ctx.measureText(g.char),top=-metrics.actualBoundingBoxAscent,bottom=Math.max(top+.001,metrics.actualBoundingBoxDescent),left=-metrics.actualBoundingBoxLeft,right=Math.max(left+.001,metrics.actualBoundingBoxRight),direction=resolvedGradientDirection(s,state.vertical);
+    if(s.fillPreset==='rainbow-wide'&&rainbows.has(direction)){
+      // Canvas gradients use the glyph's current coordinates at paint time.
+      // Map the shared page endpoints back through its translation/rotation.
+      const [x0,y0,x1,y1]=rainbows.get(direction),inverse=ctx.getTransform().inverse();
+      const a=inverse.transformPoint({x:x0*scale,y:y0*scale}),b=inverse.transformPoint({x:x1*scale,y:y1*scale});
+      ctx.fillStyle=presetGradient(ctx,s.fillPreset,a.x,a.y,b.x,b.y);
+    }else ctx.fillStyle=presetGradient(ctx,s.fillPreset,...gradientPoints({left,top,right,bottom},direction))||s.color;
+    ctx.fillText(g.char,0,0);
   });
   return { overflow, lines: lines.length, glyphs: placements.length };
 }
@@ -142,7 +164,7 @@ export function validateProject(value) {
   const num=(v,a,b)=>typeof v==='number' && Number.isFinite(v) && v>=a && v<=b;
   const color=v=>typeof v==='string' && /^#[0-9a-f]{6}$/i.test(v);
   const validEffects=v=>['outline','doubleOutline','shadow'].every(k=>v[k]==null||typeof v[k]==='boolean')&&['outlineColor','outerOutlineColor','shadowColor'].every(k=>v[k]==null||color(v[k]))&&['outlineWidth','outerOutlineWidth'].every(k=>v[k]==null||num(v[k],.1,4))&&['shadowX','shadowY'].every(k=>v[k]==null||num(v[k],-5,5))&&(v.shadowBlur==null||num(v.shadowBlur,0,5));
-  const validStyle=v=>v && validEffects(v) && (v.fillPreset==null||v.fillPreset==='solid'||Object.hasOwn(colorPresets,v.fillPreset)) && Object.hasOwn(families,v.family) && num(v.size,6,200) && typeof v.bold==='boolean' && color(v.color) && typeof v.glow==='boolean' && color(v.glowColor) && num(v.glowSize,0.2,6);
+  const validStyle=v=>v && validEffects(v) && (v.gradientDirection==null||v.gradientDirection==='auto'||Object.hasOwn(gradientDirections,v.gradientDirection)) && (v.fillPreset==null||v.fillPreset==='solid'||Object.hasOwn(colorPresets,v.fillPreset)) && Object.hasOwn(families,v.family) && num(v.size,6,200) && typeof v.bold==='boolean' && color(v.color) && typeof v.glow==='boolean' && color(v.glowColor) && num(v.glowSize,0.2,6);
   if (!s || s.version!==1 || typeof s.title!=='string' || s.title.length>100 || typeof s.text!=='string' || s.text.length>30000 || !['portrait','landscape'].includes(s.orientation) || typeof s.vertical!=='boolean' || !['left','center','right'].includes(s.align) || !num(s.lineHeight,1,3) || !color(s.paper) || !validStyle(s.style) || !Array.isArray(s.styles) || s.styles.length>s.text.length || !s.styles.every(v=>v===null || validStyle(v)) || !s.margins || !['top','right','bottom','left'].every(k=>num(s.margins[k],0,70))) throw new Error('対応していない原稿ファイルです。');
   if (s.letterSpacing!=null && !num(s.letterSpacing,-.5,.5)) throw new Error('文字間隔を読み込めません。');
   if (s.pageSize!=null && !Object.hasOwn(pageFormats,s.pageSize)) throw new Error('対応していない用紙サイズです。');

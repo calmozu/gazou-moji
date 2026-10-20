@@ -526,3 +526,43 @@ test('gradient background pixels export into PNG and PDF; old drafts and invalid
   await page.locator('#export-button').click();let event=page.waitForEvent('download');await page.locator('#confirm-export').click();let file=await event;await file.saveAs(info.outputPath('background.png'));const png=await fs.readFile(await file.path());expect(png.readUInt32BE(16)).toBe(640);const samples=await page.evaluate(async data=>{const image=new Image();image.src='data:image/png;base64,'+data;await image.decode();const c=document.createElement('canvas');c.width=image.width;c.height=image.height;const ctx=c.getContext('2d');ctx.drawImage(image,0,0);return [[20,20],[180,90],[320,180],[600,330]].map(([x,y])=>[...ctx.getImageData(x,y,1,1).data]);},png.toString('base64'));expect(new Set(samples.map(v=>v.join(','))).size).toBeGreaterThan(2);expect(samples.every(v=>v[3]===255)).toBe(true);
   await page.locator('#export-format').selectOption('pdf');event=page.waitForEvent('download');await page.locator('#confirm-export').click();file=await event;await file.saveAs(info.outputPath('background.pdf'));
 });
+
+async function rainbowSpectrum(page,source){
+  return page.evaluate(async source=>{
+    const image=new Image();image.src='data:image/png;base64,'+source;await image.decode();const c=document.createElement('canvas');c.width=image.width;c.height=image.height;const ctx=c.getContext('2d');ctx.drawImage(image,0,0);const d=ctx.getImageData(0,0,c.width,c.height).data,points=[];
+    let left=Infinity,right=-Infinity;for(let y=0;y<c.height;y++)for(let x=0;x<c.width;x++){const i=(y*c.width+x)*4,r=d[i],g=d[i+1],b=d[i+2];if(Math.max(r,g,b)-Math.min(r,g,b)>70&&Math.min(r,g,b)<180){points.push({x,r,g,b});left=Math.min(left,x);right=Math.max(right,x);}}
+    return [0,.5,1].map(t=>{const selected=points.filter(p=>Math.abs((p.x-left)/(right-left)-t)<.12);return ['r','g','b'].map(k=>selected.reduce((sum,p)=>sum+p[k],0)/selected.length);});
+  },source);
+}
+
+test('continuous rainbow spans the actual text or selected substring and follows alignment and vertical writing',async({page})=>{
+  await ready(page);await page.locator('#text').fill('■■■■■■■');
+  const result=await page.evaluate(async()=>{
+    const {initialState,render,families}=await import('/src/render.js');await document.fonts.load('400 36px '+families.sans,'■■■■■■■前後');const s=initialState();s.text='■■■■■■■';s.style.size=36;s.style.fillPreset='rainbow-wide';s.textBox={x:25,y:30,width:160,height:190};const canvas=document.createElement('canvas');
+    function sample(axis='x'){
+      render(canvas,s,null);const data=canvas.getContext('2d').getImageData(0,0,canvas.width,canvas.height).data,points=[];let min=Infinity,max=-Infinity;
+      for(let y=0;y<canvas.height;y++)for(let x=0;x<canvas.width;x++){const i=(y*canvas.width+x)*4,r=data[i],g=data[i+1],b=data[i+2];if(Math.max(r,g,b)-Math.min(r,g,b)>70&&Math.min(r,g,b)<180){const pos=axis==='x'?x:y;min=Math.min(min,pos);max=Math.max(max,pos);points.push({pos,r,g,b});}}
+      const bands=[0,.5,1].map(t=>{const band=points.filter(p=>Math.abs((p.pos-min)/(max-min)-t)<.12);return ['r','g','b'].map(k=>band.reduce((sum,p)=>sum+p[k],0)/band.length);});return {bands,hash:canvas.toDataURL()};
+    }
+    const horizontal=sample();s.align='right';const aligned=sample();s.align='left';s.letterSpacing=-.2;const tight=sample();s.text='前■■■■■■■後';s.style.fillPreset='solid';s.styles=Array.from(s.text,(_,i)=>({...s.style,fillPreset:i>0&&i<8?'rainbow-wide':'solid'}));const selected=sample();
+    s.text='■■■■■■■';s.styles=[];s.style.fillPreset='rainbow-wide';s.letterSpacing=0;s.vertical=true;const vertical=sample('y');s.vertical=false;const directions={};for(const direction of ['vertical','horizontal','diagonal','rising']){s.style.gradientDirection=direction;directions[direction]=sample(direction==='vertical'?'y':'x');}s.style.gradientDirection='auto';s.style.fillPreset='rainbow';const legacy=sample();return {horizontal,aligned,tight,selected,vertical,directions,legacy};
+  });
+  for(const key of ['horizontal','aligned','tight','selected','vertical']){const [red,green,purple]=result[key].bands;expect(red[0]).toBeGreaterThan(red[1]+50);expect(red[0]).toBeGreaterThan(red[2]+100);expect(green[1]).toBeGreaterThan(green[0]+70);expect(purple[0]).toBeGreaterThan(purple[1]+50);expect(purple[2]).toBeGreaterThan(purple[1]+80);}
+  expect(new Set(Object.values(result.directions).map(v=>v.hash)).size).toBe(4);expect(result.horizontal.hash).not.toBe(result.legacy.hash);
+});
+
+test('text gradient directions apply to selections and independent boxes, persist and reject invalid settings',async({page})=>{
+  await ready(page);await page.locator('#text').fill('前レインボー後');await page.locator('#text').evaluate(el=>{el.focus();el.setSelectionRange(1,6);el.dispatchEvent(new Event('select'));});await page.locator('#fill-preset').selectOption('rainbow-wide');await expect(page.locator('#gradient-direction')).toHaveValue('horizontal');await expect(page.locator('#wide-rainbow-hint')).toBeVisible();await page.locator('#gradient-direction').selectOption('rising');
+  let s=await project(page);expect(s.styles[1].fillPreset).toBe('rainbow-wide');expect(s.styles[1].gradientDirection).toBe('rising');expect(s.styles[0].fillPreset).toBe('solid');await page.locator('#undo').click();await page.locator('#text').evaluate(el=>{el.focus();el.setSelectionRange(1,6);el.dispatchEvent(new Event('select'));});await expect(page.locator('#gradient-direction')).toHaveValue('horizontal');await page.locator('#redo').click();
+  await page.locator('#copy-text-box').click();await page.locator('#fill-preset').selectOption('gold');await page.locator('#gradient-direction').selectOption('diagonal');s=await project(page);expect(s.secondTextBox.style).toMatchObject({fillPreset:'gold',gradientDirection:'diagonal'});expect(s.styles[1].gradientDirection).toBe('rising');await expect(page.locator('#preset-preview span')).toHaveCSS('background-image',/135deg/);
+  await expect(page.locator('#save-status')).toContainText('保存済み');await page.reload();await expect(page.locator('html')).toHaveAttribute('data-ready','true');expect((await project(page)).secondTextBox.style.gradientDirection).toBe('diagonal');
+  const saved=await project(page),bad=structuredClone(saved);bad.style.gradientDirection='unknown';await page.locator('#project-file').setInputFiles({name:'bad.kasane',mimeType:'application/json',buffer:Buffer.from(JSON.stringify(bad))});await expect(page.locator('#toast')).toContainText('原稿を開けませんでした');expect((await project(page)).styles).toEqual(saved.styles);
+});
+
+test('whole-text rainbow with double outline appears in real PNG and PDF and both diagonal gold directions render',async({page},info)=>{
+  await ready(page);await page.locator('#tab-page').click();await page.locator('#page-size').selectOption('short-mini');await page.locator('#tab-text').click();await page.locator('#text').fill('ド派手な虹色！');await page.locator('#family').selectOption('heavy');await changeBox(page,{width:580,height:150,x:30,y:60});await page.locator('#size').fill('64');await page.locator('#size').press('Enter');await page.locator('#text-effect-preset').selectOption('rainbow');
+  await expect(page.locator('#fill-preset')).toHaveValue('rainbow-wide');await expect(page.locator('#gradient-direction')).toHaveValue('horizontal');const s=await project(page);expect(s.style.doubleOutline).toBe(true);
+  await page.locator('#export-button').click();let event=page.waitForEvent('download');await page.locator('#confirm-export').click();let file=await event;await file.saveAs(info.outputPath('rainbow-wide.png'));const png=await fs.readFile(await file.path());const [red,,purple]=await rainbowSpectrum(page,png.toString('base64'));expect(red[0]).toBeGreaterThan(red[1]+50);expect(purple[2]).toBeGreaterThan(purple[1]+80);
+  await page.locator('#export-format').selectOption('pdf');event=page.waitForEvent('download');await page.locator('#confirm-export').click();file=await event;await file.saveAs(info.outputPath('rainbow-wide.pdf'));await page.locator('#close-export').click();
+  await page.locator('#fill-preset').selectOption('gold');await page.locator('#gradient-direction').selectOption('diagonal');await page.locator('#export-button').click();const diagonal=await page.locator('#export-preview').getAttribute('src');await page.locator('#close-export').click();await page.locator('#gradient-direction').selectOption('rising');await page.locator('#export-button').click();expect(await page.locator('#export-preview').getAttribute('src')).not.toBe(diagonal);
+});
