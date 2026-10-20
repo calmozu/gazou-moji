@@ -1,11 +1,12 @@
+import { svgImageSource } from './svg-import.js';
 import { dimensions, imageBounds } from './render.js';
 
 export const overlayPanel=`
 <div id="panel-overlay" class="panel" role="tabpanel" aria-labelledby="tab-overlay" hidden>
  <div class="section"><p class="eyebrow">IMAGES</p><h2>画像を、自由に重ねる。</h2>
-  <button id="add-overlay" class="upload">＋ PNG・画像を追加</button>
-  <input id="overlay-file" type="file" accept="image/png,image/jpeg,image/webp" hidden>
-  <p class="hint">透明なPNGのロゴやイラストも、そのまま重ねられます。最大12枚。画像はこのブラウザー内で処理します。</p>
+  <button id="add-overlay" class="upload">＋ PNG・SVG・画像を追加</button>
+  <input id="overlay-file" type="file" accept="image/png,image/svg+xml,image/jpeg,image/webp,.svg" hidden>
+  <p class="hint">PNG・SVGのロゴやイラストを重ねられます。SVGは透明な1枚の画像として読み込みます。最大12枚。画像はこのブラウザー内で処理します。</p>
   <label id="overlay-select-field" class="field" hidden><span class="label">編集する画像</span><select id="overlay-select"></select></label>
  </div>
  <div id="overlay-controls" hidden>
@@ -66,12 +67,13 @@ export function createOverlayEditor({getState,getImages,getTab,remember,changed,
  $('add-overlay').onclick=()=>$('overlay-file').click();
  $('overlay-file').onchange=async e=>{
   const file=e.target.files[0];e.target.value='';if(!file)return;
-  if(!['image/png','image/jpeg','image/webp'].includes(file.type)){toast('PNG・JPEG・WebP形式の画像を選んでください。');return;}
+  const isSVG=file.type==='image/svg+xml'||/\.svg$/i.test(file.name);
+  if(!isSVG&&!['image/png','image/jpeg','image/webp'].includes(file.type)){toast('PNG・SVG・JPEG・WebP形式の画像を選んでください。');return;}
   if(file.size>40000000){toast('画像が大きすぎます。40 MB以下の画像を選んでください。');return;}
   const state=getState();if(items().length>=12)return;
   loading=true;$('add-overlay').disabled=true;
   try{
-   const original=await decodeImage(await readDataURL(file)),ratio=Math.min(1,2048/Math.max(original.naturalWidth,original.naturalHeight));
+   const original=await decodeImage(isSVG?await svgImageSource(file):await readDataURL(file)),ratio=Math.min(1,2048/Math.max(original.naturalWidth,original.naturalHeight));
    const canvas=document.createElement('canvas');canvas.width=Math.max(1,Math.round(original.naturalWidth*ratio));canvas.height=Math.max(1,Math.round(original.naturalHeight*ratio));canvas.getContext('2d').drawImage(original,0,0,canvas.width,canvas.height);
    const src=canvas.toDataURL('image/png');
    if(src.length>12000000||items().reduce((sum,item)=>sum+item.src.length,0)+src.length>30000000)throw new Error('画像が大きすぎます。小さな画像を選ぶか、不要な画像を削除してください。');

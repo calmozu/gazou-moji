@@ -407,3 +407,55 @@ test('old solid-colour drafts keep their appearance and invalid preset names do 
   await page.locator('#project-file').setInputFiles({name:'old.kasane',mimeType:'application/json',buffer:Buffer.from(JSON.stringify(old))});await expect(page.locator('#fill-preset')).toHaveValue('solid');await page.locator('#fill-preset').selectOption('gold');const current=await project(page),bad=structuredClone(current);bad.styles[0].fillPreset='unknown';
   await page.locator('#project-file').setInputFiles({name:'bad.kasane',mimeType:'application/json',buffer:Buffer.from(JSON.stringify(bad))});await expect(page.locator('#toast')).toContainText('原稿を開けませんでした');expect((await project(page)).styles).toEqual(current.styles);
 });
+
+test('thumbnail presets and custom effects preserve selection, independent boxes and undo',async({page})=>{
+  await ready(page);await page.locator('#text').fill('注目の見出し');await page.locator('#text').evaluate(el=>{el.focus();el.setSelectionRange(0,2);el.dispatchEvent(new Event('select'));});await page.locator('#text-effect-preset').selectOption('blue');
+  let s=await project(page);expect(s.styles[0]).toMatchObject({color:'#183db8',outline:true,doubleOutline:true,outlineColor:'#ffffff',outerOutlineColor:'#141414',shadow:true});expect(s.styles[2].outline).toBe(false);expect(s.style.family).toBe('sans');expect(s.styles[0].size).toBe(24);
+  await page.locator('#undo').click();expect((await project(page)).styles[0].outline).toBe(false);await page.locator('#redo').click();expect((await project(page)).styles[0].doubleOutline).toBe(true);
+  await page.locator('#copy-text-box').click();await page.locator('#text-effect-preset').selectOption('pink');await page.locator('#text-effect-details summary').click();await page.locator('#outline-color').evaluate(el=>{el.value='#336699';el.dispatchEvent(new Event('change',{bubbles:true}));});await page.locator('#outline-width').focus();await page.locator('#outline-width').press('ArrowRight');
+  s=await project(page);expect(s.secondTextBox.style.outlineWidth).toBe(.6);expect(s.secondTextBox.style.outlineColor).toBe('#336699');expect(s.styles[0].outlineColor).toBe('#ffffff');
+  await page.locator('#undo').click();expect((await project(page)).secondTextBox.style.outlineWidth).toBe(.5);await page.locator('#redo').click();
+  await page.locator('#clear-text-effects').click();s=await project(page);expect(s.secondTextBox.style).toMatchObject({outline:false,doubleOutline:false,shadow:false,glow:false,color:'#f25c9b'});await page.locator('#undo').click();
+  const saved=await project(page);await expect(page.locator('#save-status')).toContainText('保存済み');await page.reload();await expect(page.locator('html')).toHaveAttribute('data-ready','true');expect((await project(page)).secondTextBox).toEqual(saved.secondTextBox);
+  await page.locator('#project-file').setInputFiles({name:'effects.kasane',mimeType:'application/json',buffer:Buffer.from(JSON.stringify(saved))});expect((await project(page)).styles).toEqual(saved.styles);
+});
+
+test('double outlines and drop shadows paint distinct pixels without covering neighbouring text fills',async({page})=>{
+  await ready(page);await page.locator('#text').fill('春夏■');
+  const result=await page.evaluate(async()=>{
+    const {initialState,render,families}=await import('/src/render.js');await document.fonts.load('700 80px '+families.sans,'春夏■');const s=initialState();s.text='春夏■';s.letterSpacing=-.3;s.style={...s.style,size:70,bold:true,color:'#ffff00'};s.textBox={x:30,y:30,width:150,height:200};const canvas=document.createElement('canvas');
+    function capture(){render(canvas,s,null);const data=canvas.getContext('2d').getImageData(0,0,canvas.width,canvas.height).data;let yellow=0,blue=0,red=0,green=0;for(let i=0;i<data.length;i+=4){const [r,g,b]=data.slice(i,i+3);if(r>230&&g>230&&b<30)yellow++;if(b>150&&r<50&&g<120)blue++;if(r>150&&g<60&&b<60)red++;if(g>110&&g>r+50&&g>b+30)green++;}return {yellow,blue,red,green};}
+    const plain=capture();Object.assign(s.style,{outline:true,outlineColor:'#0044cc',outlineWidth:.7,doubleOutline:true,outerOutlineColor:'#dd2222',outerOutlineWidth:.7,shadow:true,shadowColor:'#22aa55',shadowX:2,shadowY:2,shadowBlur:0});const horizontal=capture();s.vertical=true;const vertical=capture();return {plain,horizontal,vertical};
+  });
+  for(const mode of ['horizontal','vertical'])for(const color of ['yellow','blue','red','green'])expect(result[mode][color]).toBeGreaterThan(100);
+  expect(result.horizontal.yellow).toBeGreaterThan(result.plain.yellow*.98);
+});
+
+test('thumbnail decoration presets export as real PNG and PDF, and legacy styles remain editable',async({page},info)=>{
+  await ready(page);await page.locator('#tab-page').click();await page.locator('#page-size').selectOption('short-mini');await page.locator('#tab-text').click();await page.locator('#text').fill('サムネイル');await page.locator('#family').selectOption('heavy');await page.locator('#size').fill('64');await page.locator('#size').press('Enter');
+  for(const preset of ['white','yellow','blue','pink','red','gold']){await page.locator('#text-effect-preset').selectOption(preset);const s=await project(page);expect(s.style.outline).toBe(true);expect(s.style.family).toBe('heavy');}
+  await page.locator('#export-button').click();let event=page.waitForEvent('download');await page.locator('#confirm-export').click();let file=await event;await file.saveAs(info.outputPath('effects.png'));const png=await fs.readFile(await file.path());expect(png.readUInt32BE(16)).toBe(640);
+  await page.locator('#export-format').selectOption('pdf');event=page.waitForEvent('download');await page.locator('#confirm-export').click();file=await event;await file.saveAs(info.outputPath('effects.pdf'));await page.locator('#close-export').click();
+  const old=await project(page);for(const style of [old.style,...old.styles])for(const key of ['outline','outlineColor','outlineWidth','doubleOutline','outerOutlineColor','outerOutlineWidth','shadow','shadowColor','shadowX','shadowY','shadowBlur'])delete style[key];
+  await page.locator('#project-file').setInputFiles({name:'old.kasane',mimeType:'application/json',buffer:Buffer.from(JSON.stringify(old))});await expect(page.locator('#outline')).not.toBeChecked();await expect(page.locator('#text-shadow')).not.toBeChecked();
+  const bad=structuredClone(old);bad.style.outlineWidth=100;await page.locator('#project-file').setInputFiles({name:'bad.kasane',mimeType:'application/json',buffer:Buffer.from(JSON.stringify(bad))});await expect(page.locator('#toast')).toContainText('原稿を開けませんでした');expect((await project(page)).style).toEqual(old.style);
+});
+
+const svgLogo='<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 100"><defs><linearGradient id="gold"><stop stop-color="#d4a43d"/><stop offset="1" stop-color="#fff0ac"/></linearGradient></defs><rect x="50" y="25" width="100" height="50" fill="#0044cc"/></svg>';
+async function uploadSVG(page,source=svgLogo,name='透過ロゴ.svg'){await page.locator('#overlay-file').setInputFiles({name,mimeType:'image/svg+xml',buffer:Buffer.from(source)});}
+
+test('SVG viewBox imports as one transparent PNG layer and survives export and project reload',async({page},info)=>{
+  await ready(page);await page.locator('#tab-page').click();await page.locator('#page-size').selectOption('short-mini');await page.locator('#tab-overlay').click();await uploadSVG(page);await expect(page.locator('#overlay-select')).toContainText('透過ロゴ.svg');
+  let s=await project(page);expect(s.overlays).toHaveLength(1);expect(s.overlays[0].src).toMatch(/^data:image\/png;base64,/);expect(s.overlays[0].width/s.overlays[0].height).toBeCloseTo(2,8);expect(await page.evaluate(async src=>{const image=new Image();image.src=src;await image.decode();return [image.naturalWidth,image.naturalHeight];},s.overlays[0].src)).toEqual([2048,1024]);await overlayValue(page,'width',240);await overlayValue(page,'x',100);await overlayValue(page,'y',80);
+  const sample=()=>page.locator('#canvas').evaluate(c=>{const ctx=c.getContext('2d');return {outside:[...ctx.getImageData(110,90,1,1).data],inside:[...ctx.getImageData(220,140,1,1).data]};});await expect.poll(sample).toEqual({outside:[255,255,255,255],inside:[0,68,204,255]});
+  await page.locator('#export-button').click();let event=page.waitForEvent('download');await page.locator('#confirm-export').click();let file=await event;await file.saveAs(info.outputPath('svg.png'));await page.locator('#export-format').selectOption('pdf');event=page.waitForEvent('download');await page.locator('#confirm-export').click();file=await event;await file.saveAs(info.outputPath('svg.pdf'));await page.locator('#close-export').click();
+  s=await project(page);await page.locator('#delete-overlay').click();await page.locator('#undo').click();expect((await project(page)).overlays).toEqual(s.overlays);await page.locator('#project-file').setInputFiles({name:'svg.kasane',mimeType:'application/json',buffer:Buffer.from(JSON.stringify(s))});expect((await project(page)).overlays).toEqual(s.overlays);
+});
+
+test('SVG gradients, large dimensions, local symbols and invalid files are handled without loading external content',async({page})=>{
+  await ready(page);await page.locator('#tab-overlay').click();const external=[];page.on('request',request=>{if(request.url().startsWith('https://example.com/'))external.push(request.url());});
+  const source='<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd"><svg xmlns="http://www.w3.org/2000/svg" width="4000" height="2000"><script>window.svgExecuted=true</script><defs><linearGradient id="g"><stop stop-color="red"/><stop offset="1" stop-color="blue"/></linearGradient><rect id="r" width="4000" height="2000" fill="url(#g)"/></defs><use href="#r"/><image href="https://example.com/test.png" width="100" height="100"/></svg>';
+  await uploadSVG(page,source,'大きな.svg');await expect(page.locator('#overlay-select')).toContainText('大きな.svg');const s=await project(page);const colors=await page.evaluate(async src=>{const img=new Image();img.src=src;await img.decode();const c=document.createElement('canvas');c.width=img.width;c.height=img.height;const ctx=c.getContext('2d');ctx.drawImage(img,0,0);return {size:[img.width,img.height],left:[...ctx.getImageData(20,500,1,1).data],right:[...ctx.getImageData(2000,500,1,1).data],executed:!!window.svgExecuted};},s.overlays[0].src);expect(colors.size).toEqual([2048,1024]);expect(colors.left[0]).toBeGreaterThan(200);expect(colors.right[2]).toBeGreaterThan(200);expect(colors.executed).toBe(false);expect(external).toEqual([]);
+  await uploadSVG(page,'<svg>broken','bad.svg');await expect(page.locator('#toast')).toContainText('SVGファイルを読み込めません');expect((await project(page)).overlays).toEqual(s.overlays);
+  await uploadSVG(page,'<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100"><foreignObject/></svg>','html.svg');await expect(page.locator('#toast')).toContainText('HTMLを含むSVG');expect((await project(page)).overlays).toEqual(s.overlays);
+});

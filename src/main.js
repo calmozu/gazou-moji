@@ -1,3 +1,4 @@
+import { effectDefaults, textEffectPresets, effectPanel, effectInputs } from './text-effects.js';
 import { colorPresets, presetCSS } from './presets.js';
 import '@fontsource/yomogi/400.css';
 import '@fontsource/yuji-syuku/400.css';
@@ -52,6 +53,7 @@ document.querySelector('#app').innerHTML = `
    <div id="preset-preview" class="preset-preview" aria-hidden="true" hidden><span>あ Aa</span></div>
    <p class="hint">文字を選ぶと、その部分だけに適用します。色を選び直すと単色に戻ります。</p>
   </div>
+${effectPanel}
   <div class="section"><h2>文字の並べ方</h2>
    <div class="segmented" role="group" aria-label="文字揃え"><button data-align="left" class="active">左揃え</button><button data-align="center">中央</button><button data-align="right">右揃え</button></div>
    <label class="check"><input type="checkbox" id="vertical">縦書きにする</label>
@@ -184,7 +186,7 @@ async function draw(){
   $('char-count').textContent=`${textLayers(state).reduce((sum,t)=>sum+[...t.text].length,0).toLocaleString()} 文字`;
   fitPaper();
 }
-function activeStyle(){ return {...layer().style,...(selection[0]!==selection[1]?layer().styles[selection[0]]:null)}; }
+function activeStyle(){ return {...effectDefaults,...layer().style,...(selection[0]!==selection[1]?layer().styles[selection[0]]:null)}; }
 function selectionInfo(){ const [a,b]=selection; $('selection-info').textContent=a!==b?`${b-a} 文字を選択中 · 設定は選択範囲に反映します`:'選択なし · 設定は文字全体に反映します'; }
 function syncControls(){
   if(activeTextBox===1&&!state.secondTextBox)activeTextBox=0;
@@ -199,6 +201,7 @@ function syncControls(){
   $('text-box-other').hidden=tab!=='text'||!state.secondTextBox;
   const s=activeStyle();
   for(const [id,v] of Object.entries({family:s.family,size:s.size,color:s.color,'glow-color':s.glowColor,'glow-size':s.glowSize,fit:state.background.fit,opacity:state.background.opacity,zoom:state.background.zoom,'image-x':state.background.x,'image-y':state.background.y,'line-height':layer().lineHeight,'paper-color':state.paper,title:state.title})) $(id).value=v;
+  for(const [id,key] of Object.entries(effectInputs)){const el=$(id);if(el.type==='checkbox')el.checked=s[key];else el.value=s[key];if($(id+'-value'))$(id+'-value').value=`${s[key]} mm`;}
   $('fill-preset').value=s.fillPreset||'solid';
   $('preset-preview').hidden=!Object.hasOwn(colorPresets,s.fillPreset||'');$('preset-preview').firstElementChild.style.backgroundImage=presetCSS(s.fillPreset);
   $('bold').setAttribute('aria-pressed',s.bold); $('bold').classList.toggle('active',s.bold); $('bold').style.background=s.bold?'#e4eddf':'';
@@ -233,8 +236,8 @@ function syncControls(){
   $('text-box').hidden=tab!=='text'; fitPaper();
   overlayEditor.sync();selectionInfo(); updateHistory();
 }
-function applyStyle(patch) {
-  remember(); const [a,b]=selection;
+function applyStyle(patch,{record=true}={}) {
+  if(record)remember(); const [a,b]=selection;
   if(a!==b) {for(let i=a;i<b;i++) layer().styles[i]={...layer().style,...layer().styles[i],...patch};}
   else {layer().style={...layer().style,...patch};layer().styles=layer().styles.map(s=>s?{...s,...patch}:s);}
   changed();
@@ -256,6 +259,15 @@ text.addEventListener('input',()=>{
   layer().text=next;selection=[text.selectionStart,text.selectionEnd];changed({sync:false});selectionInfo();
 });
 for(const [id,key] of [['family','family'],['glow-color','glowColor']]) $(id).addEventListener('change',e=>applyStyle({[key]:e.target.value}));
+$('text-effect-preset').onchange=e=>{const preset=textEffectPresets[e.target.value];if(preset)applyStyle(preset.style);e.target.value='';};
+for(const [id,key] of Object.entries(effectInputs)){
+  const el=$(id);
+  if(el.type==='range'){
+    el.addEventListener('pointerdown',()=>remember());el.addEventListener('keydown',e=>{if(['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Home','End'].includes(e.key))remember();});
+    el.oninput=e=>applyStyle({[key]:Number(e.target.value)},{record:false});
+  }else el.onchange=e=>applyStyle({[key]:el.type==='checkbox'?el.checked:el.value,...(key==='doubleOutline'&&el.checked?{outline:true}:{})});
+}
+$('clear-text-effects').onclick=()=>applyStyle({outline:false,doubleOutline:false,shadow:false,glow:false});
 $('color').onchange=e=>applyStyle({color:e.target.value,fillPreset:'solid'});
 $('fill-preset').onchange=e=>applyStyle({fillPreset:e.target.value});
 $('size').addEventListener('change',e=>{const v=Number(e.target.value)/fontSizeFactor();if(!Number.isFinite(v)||v<6||v>200){syncControls();return;}applyStyle({size:v});});

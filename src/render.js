@@ -1,3 +1,4 @@
+import { effectDefaults } from './text-effects.js';
 import { colorPresets, presetGradient } from './presets.js';
 export const families = {
   sans: '"Noto Sans JP", sans-serif',
@@ -12,7 +13,7 @@ export const families = {
   reggae: '"Reggae One", sans-serif',
 };
 export const familyLabels={sans:'角ゴシック',serif:'明朝',round:'丸ゴシック',textbook:'教科書風',handwriting:'手書き（よもぎ）',brush:'筆文字（佑字）',pop:'ポップ（はちまる）',heavy:'極太ゴシック',decorative:'飾り明朝',reggae:'個性派（レゲエ）'};
-export const baseStyle = { family: 'sans', size: 24, bold: false, color: '#252923', fillPreset:'solid', glow: false, glowColor: '#ffffff', glowSize: 1.5 };
+export const baseStyle = { ...effectDefaults, family: 'sans', size: 24, bold: false, color: '#252923', fillPreset:'solid', glow: false, glowColor: '#ffffff', glowSize: 1.5 };
 export const pageFormats={
   a4: {label:'A4'},
   youtube: {label:'YouTube 横動画',pixels:[1920,1080]},
@@ -104,26 +105,34 @@ function drawText(ctx,state,scale) {
     }
     cross += state.vertical ? -extent : extent;
   }
-  // Clip to the page, not the text box: soft glow may extend into the margins.
-  for (const g of placements) {
-    ctx.save(); font(ctx,g.style); ctx.fillStyle=g.style.color;
-    ctx.translate(g.x,g.y);
-    if (state.vertical) {
-      ctx.textAlign='center'; ctx.textBaseline='middle';
-      if (/^[\u0020-\u007eー〜…―—（）［］「」『』【】]$/u.test(g.char)) ctx.rotate(Math.PI/2);
-      else if (/^[、。，．]$/u.test(g.char)) ctx.translate(g.size*.28,-g.size*.28);
-    } else { ctx.textAlign='left'; ctx.textBaseline='alphabetic'; }
+  // Paint each whole layer in passes so neighbouring outlines never cover a fill.
+  const withGlyph=(g,paint)=>{
+    const style={...effectDefaults,...g.style};ctx.save();font(ctx,style);ctx.translate(g.x,g.y);
+    if(state.vertical){ctx.textAlign='center';ctx.textBaseline='middle';if(/^[\u0020-\u007eー〜…―—（）［］「」『』【】]$/u.test(g.char))ctx.rotate(Math.PI/2);else if(/^[、。，．]$/u.test(g.char))ctx.translate(g.size*.28,-g.size*.28);}
+    else{ctx.textAlign='left';ctx.textBaseline='alphabetic';}
+    ctx.lineJoin='round';paint(style);ctx.restore();
+  };
+  const width=s=>s.outline?s.outlineWidth+(s.doubleOutline?s.outerOutlineWidth:0):0;
+  for(const g of placements)withGlyph(g,s=>{
+    if(!s.shadow)return;
+    ctx.fillStyle=s.shadowColor;ctx.strokeStyle=s.shadowColor;ctx.lineWidth=width(s)*2;
+    ctx.shadowColor=s.shadowColor;ctx.shadowBlur=s.shadowBlur*scale;ctx.shadowOffsetX=s.shadowX*scale;ctx.shadowOffsetY=s.shadowY*scale;
+    if(width(s))ctx.strokeText(g.char,0,0);ctx.fillText(g.char,0,0);
+  });
+  for(const g of placements)withGlyph(g,s=>{
+    if(!s.glow)return;
+    ctx.fillStyle=s.color;ctx.shadowColor=s.glowColor;ctx.shadowBlur=s.glowSize*scale;
+    ctx.fillText(g.char,0,0);ctx.fillText(g.char,0,0);ctx.shadowBlur=0;
+    ctx.strokeStyle=s.glowColor;ctx.lineWidth=s.glowSize*.28;ctx.strokeText(g.char,0,0);
+  });
+  for(const outer of [true,false])for(const g of placements)withGlyph(g,s=>{
+    if(!s.outline||(outer&&!s.doubleOutline))return;
+    ctx.strokeStyle=outer?s.outerOutlineColor:s.outlineColor;ctx.lineWidth=2*(outer?width(s):s.outlineWidth);ctx.strokeText(g.char,0,0);
+  });
+  for(const g of placements)withGlyph(g,s=>{
     const metrics=ctx.measureText(g.char),top=state.vertical?-g.size/2:-metrics.actualBoundingBoxAscent,bottom=state.vertical?g.size/2:metrics.actualBoundingBoxDescent;
-    ctx.fillStyle=presetGradient(ctx,g.style.fillPreset,0,top,0,Math.max(top+.001,bottom))||g.style.color;
-    if (g.style.glow) {
-      ctx.shadowColor=g.style.glowColor; ctx.shadowBlur=g.style.glowSize*scale;
-      ctx.fillText(g.char,0,0); ctx.fillText(g.char,0,0);
-      ctx.shadowBlur=0;
-      ctx.strokeStyle=g.style.glowColor; ctx.lineJoin='round'; ctx.lineWidth=g.style.glowSize*.28;
-      ctx.strokeText(g.char,0,0);
-    }
-    ctx.fillText(g.char,0,0); ctx.restore();
-  }
+    ctx.fillStyle=presetGradient(ctx,s.fillPreset,0,top,0,Math.max(top+.001,bottom))||s.color;ctx.fillText(g.char,0,0);
+  });
   return { overflow, lines: lines.length, glyphs: placements.length };
 }
 
@@ -131,7 +140,8 @@ export function validateProject(value) {
   const s = value;
   const num=(v,a,b)=>typeof v==='number' && Number.isFinite(v) && v>=a && v<=b;
   const color=v=>typeof v==='string' && /^#[0-9a-f]{6}$/i.test(v);
-  const validStyle=v=>v && (v.fillPreset==null||v.fillPreset==='solid'||Object.hasOwn(colorPresets,v.fillPreset)) && Object.hasOwn(families,v.family) && num(v.size,6,200) && typeof v.bold==='boolean' && color(v.color) && typeof v.glow==='boolean' && color(v.glowColor) && num(v.glowSize,0.2,6);
+  const validEffects=v=>['outline','doubleOutline','shadow'].every(k=>v[k]==null||typeof v[k]==='boolean')&&['outlineColor','outerOutlineColor','shadowColor'].every(k=>v[k]==null||color(v[k]))&&['outlineWidth','outerOutlineWidth'].every(k=>v[k]==null||num(v[k],.1,4))&&['shadowX','shadowY'].every(k=>v[k]==null||num(v[k],-5,5))&&(v.shadowBlur==null||num(v.shadowBlur,0,5));
+  const validStyle=v=>v && validEffects(v) && (v.fillPreset==null||v.fillPreset==='solid'||Object.hasOwn(colorPresets,v.fillPreset)) && Object.hasOwn(families,v.family) && num(v.size,6,200) && typeof v.bold==='boolean' && color(v.color) && typeof v.glow==='boolean' && color(v.glowColor) && num(v.glowSize,0.2,6);
   if (!s || s.version!==1 || typeof s.title!=='string' || s.title.length>100 || typeof s.text!=='string' || s.text.length>30000 || !['portrait','landscape'].includes(s.orientation) || typeof s.vertical!=='boolean' || !['left','center','right'].includes(s.align) || !num(s.lineHeight,1,3) || !color(s.paper) || !validStyle(s.style) || !Array.isArray(s.styles) || s.styles.length>s.text.length || !s.styles.every(v=>v===null || validStyle(v)) || !s.margins || !['top','right','bottom','left'].every(k=>num(s.margins[k],0,70))) throw new Error('対応していない原稿ファイルです。');
   if (s.letterSpacing!=null && !num(s.letterSpacing,-.5,.5)) throw new Error('文字間隔を読み込めません。');
   if (s.pageSize!=null && !Object.hasOwn(pageFormats,s.pageSize)) throw new Error('対応していない用紙サイズです。');
