@@ -17,6 +17,7 @@ export function dimensions(state) {
   const f=pageFormat(state),pixels=f.referencePixels || f.pixels;
   return pixels ? pixels.map(n=>n*25.4/300) : state.orientation === 'portrait' ? [210,297] : [297,210];
 }
+export function textLayers(state) { return state.secondTextBox ? [state,state.secondTextBox] : [state]; }
 export function textBounds(state) {
   const [w,h]=dimensions(state), m=state.margins;
   const b=state.textBox || {x:m.left,y:m.top,width:w-m.left-m.right,height:h-m.top-m.bottom};
@@ -24,7 +25,7 @@ export function textBounds(state) {
   return {x:Math.max(0,Math.min(w-width,b.x)),y:Math.max(0,Math.min(h-height,b.y)),width,height};
 }
 export function initialState() {
-  return { version: 1, title: '無題のかさね', text: '', styles: [], style: { ...baseStyle }, pageSize:'a4', pageLayoutVersion:2, orientation: 'portrait', vertical: false, align: 'left', lineHeight: 1.65,
+  return { version: 1, title: '無題のかさね', text: '', styles: [], style: { ...baseStyle }, pageSize:'a4', pageLayoutVersion:2, orientation: 'portrait', vertical: false, align: 'left', lineHeight: 1.65, letterSpacing:0, secondTextBox:null,
     margins: { top: 20, right: 20, bottom: 20, left: 20 }, textBox: {x:35,y:40,width:140,height:100}, paper: '#ffffff',
     background: { src: '', fit: 'cover', opacity: 100, zoom: 1, x: 0, y: 0 } };
 }
@@ -51,15 +52,19 @@ export function render(canvas, state, image, { dpi = 120 } = {}) {
     const r = backgroundRect(state,image);
     ctx.save(); ctx.globalAlpha = state.background.opacity/100; ctx.drawImage(image,r.x,r.y,r.w,r.h); ctx.restore();
   }
+  const results=textLayers(state).map(layer=>drawText(ctx,{...state,...layer},scale));
+  return {overflow:results.some(r=>r.overflow),lines:results.reduce((sum,r)=>sum+r.lines,0),glyphs:results.reduce((sum,r)=>sum+r.glyphs,0),overflowingBoxes:results.flatMap((r,i)=>r.overflow?[i+1]:[])};
+}
+function drawText(ctx,state,scale) {
   const box=textBounds(state), maxLength=state.vertical ? box.height : box.width;
-  const lines = []; let line = [], length = 0, largest = 0;
-  function finish() { lines.push({ glyphs: line, length, size: largest || state.style.size*25.4/72 }); line=[]; length=0; largest=0; }
+  const lines = []; let line = [], length = 0, largest = 0, cursor = 0;
+  function finish() { lines.push({ glyphs: line, length, size: largest || state.style.size*25.4/72 }); line=[]; length=0; largest=0; cursor=0; }
   for (const {segment: char,index} of segmenter.segment(state.text)) {
     if (char === '\n') { finish(); continue; }
     const style = { ...state.style, ...state.styles[index] };
     const size = font(ctx,style), advance = state.vertical ? size : ctx.measureText(char).width;
-    if (line.length && length+advance>maxLength && !noStart.test(char)) finish();
-    line.push({ char, style, size, advance }); length+=advance; largest=Math.max(largest,size);
+    if (line.length && Math.max(length,cursor+advance)>maxLength && !noStart.test(char)) finish();
+    line.push({ char, style, size, offset:cursor }); length=Math.max(length,cursor+advance); cursor+=Math.max(size*.05,advance+size*(state.letterSpacing||0)); largest=Math.max(largest,size);
   }
   if (line.length || state.text.endsWith('\n')) finish();
   let cross = state.vertical ? box.x+box.width : box.y, overflow = false;
@@ -70,8 +75,8 @@ export function render(canvas, state, image, { dpi = 120 } = {}) {
     let along = (state.vertical ? box.y : box.x) + (state.align === 'center' ? (maxLength-l.length)/2 : state.align === 'right' ? maxLength-l.length : 0);
     if (l.length>maxLength+.0001) overflow=true;
     for (const g of l.glyphs) {
-      const x = state.vertical ? cross-l.size/2 : along, y = state.vertical ? along+g.size/2 : cross+l.size*.88;
-      placements.push({ ...g,x,y }); along+=g.advance;
+      const x = state.vertical ? cross-l.size/2 : along+g.offset, y = state.vertical ? along+g.offset+g.size/2 : cross+l.size*.88;
+      placements.push({ ...g,x,y });
     }
     cross += state.vertical ? -extent : extent;
   }
@@ -95,12 +100,14 @@ export function render(canvas, state, image, { dpi = 120 } = {}) {
   }
   return { overflow, lines: lines.length, glyphs: placements.length };
 }
+
 export function validateProject(value) {
   const s = value;
   const num=(v,a,b)=>typeof v==='number' && Number.isFinite(v) && v>=a && v<=b;
   const color=v=>typeof v==='string' && /^#[0-9a-f]{6}$/i.test(v);
   const validStyle=v=>v && Object.hasOwn(families,v.family) && num(v.size,6,200) && typeof v.bold==='boolean' && color(v.color) && typeof v.glow==='boolean' && color(v.glowColor) && num(v.glowSize,0.2,6);
   if (!s || s.version!==1 || typeof s.title!=='string' || s.title.length>100 || typeof s.text!=='string' || s.text.length>30000 || !['portrait','landscape'].includes(s.orientation) || typeof s.vertical!=='boolean' || !['left','center','right'].includes(s.align) || !num(s.lineHeight,1,3) || !color(s.paper) || !validStyle(s.style) || !Array.isArray(s.styles) || s.styles.length>s.text.length || !s.styles.every(v=>v===null || validStyle(v)) || !s.margins || !['top','right','bottom','left'].every(k=>num(s.margins[k],0,70))) throw new Error('対応していない原稿ファイルです。');
+  if (s.letterSpacing!=null && !num(s.letterSpacing,-.5,.5)) throw new Error('文字間隔を読み込めません。');
   if (s.pageSize!=null && !Object.hasOwn(pageFormats,s.pageSize)) throw new Error('対応していない用紙サイズです。');
   if (s.pageLayoutVersion!=null && s.pageLayoutVersion!==2) throw new Error('対応していない用紙の設定です。');
   const legacyMini=s.pageSize==='short-mini' && s.pageLayoutVersion==null;
@@ -108,14 +115,23 @@ export function validateProject(value) {
     const t=s.textBox,[w,h]=legacyMini?dimensions({...s,pageSize:'short'}):dimensions(s);
     if (!num(t.x,0,w)||!num(t.y,0,h)||!num(t.width,20,w)||!num(t.height,20,h)||t.x+t.width>w+.0001||t.y+t.height>h+.0001) throw new Error('文字枠の位置や大きさを読み込めません。');
   }
+  if (s.secondTextBox!=null) {
+    const t=s.secondTextBox;
+    if (typeof t!=='object'||typeof t.text!=='string'||t.text.length>30000||!validStyle(t.style)||!Array.isArray(t.styles)||t.styles.length>t.text.length||!t.styles.every(v=>v===null||validStyle(v))||typeof t.vertical!=='boolean'||!['left','center','right'].includes(t.align)||!num(t.lineHeight,1,3)||(t.letterSpacing!=null&&!num(t.letterSpacing,-.5,.5))||!t.textBox||t.secondTextBox!=null) throw new Error('2つ目の文字ボックスを読み込めません。');
+    const r=t.textBox,[w,h]=legacyMini?dimensions({...s,pageSize:'short'}):dimensions(s);
+    if (!num(r.x,0,w)||!num(r.y,0,h)||!num(r.width,20,w)||!num(r.height,20,h)||r.x+r.width>w+.0001||r.y+r.height>h+.0001) throw new Error('2つ目の文字枠の位置や大きさを読み込めません。');
+  }
   const b=s.background;
   if (!b || typeof b.src!=='string' || b.src.length>25000000 || (b.src && !/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(b.src)) || !['cover','contain','width','height'].includes(b.fit) || !num(b.opacity,0,100) || !num(b.zoom,1,5) || !num(b.x,-1000,1000) || !num(b.y,-1000,1000)) throw new Error('背景画像の設定を読み込めません。');
   const copy=structuredClone(s);
   if (legacyMini) {
     // Older mini drafts used portrait bounds. Keep their contents and move the
     // text frame proportionally into the new landscape page before validating again.
-    const box=textBounds({...s,pageSize:'short'}),rx=1920/1080,ry=1080/1920;
-    copy.textBox=textBounds({...copy,textBox:{x:box.x*rx,y:box.y*ry,width:box.width*rx,height:box.height*ry}});
+    const rx=1920/1080,ry=1080/1920;
+    for(const layer of textLayers(copy)){
+      const box=textBounds({...s,...layer,pageSize:'short'});
+      layer.textBox=textBounds({...copy,textBox:{x:box.x*rx,y:box.y*ry,width:box.width*rx,height:box.height*ry}});
+    }
     for(const key in copy.margins)copy.margins[key]=Math.min(70,copy.margins[key]*(key==='left'||key==='right'?rx:ry));
     const [w,h]=dimensions(copy);
     for(const [first,second,size] of [['left','right',w],['top','bottom',h]]){

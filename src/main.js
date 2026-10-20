@@ -7,7 +7,7 @@ import '@fontsource/zen-maru-gothic/700.css';
 import '@fontsource/klee-one/400.css';
 import '@fontsource/klee-one/600.css';
 import './style.css';
-import { families, initialState, render, dimensions, textBounds, validateProject, pageFormats, pageFormat, pageScale } from './render.js';
+import { families, initialState, render, dimensions, textBounds, validateProject, pageFormats, pageFormat, pageScale, textLayers } from './render.js';
 import { saveDraft, loadDraft } from './storage.js';
 import { pngWithDpi } from './png.js';
 
@@ -29,23 +29,26 @@ document.querySelector('#app').innerHTML = `
  </div>
  <div id="panel-text" class="panel" role="tabpanel" aria-labelledby="tab-text">
   <div class="section"><p class="eyebrow">WORDS</p><h2>重ねたい、ことば。</h2>
-   <label for="text" class="label">本文</label><textarea id="text" maxlength="30000" placeholder="ここに文字を入力してください。&#10;&#10;写真にそっと、ことばを重ねて。" spellcheck="false"></textarea>
+   <div class="segmented box-selector" role="group" aria-label="編集する文字ボックス"><button id="select-box-1" class="active" aria-pressed="true">BOX1</button><button id="select-box-2" aria-pressed="false" hidden>BOX2</button><button id="add-text-box">＋ BOX2を追加</button></div>
+   <label for="text" class="label" id="text-label">BOX1の本文</label><textarea id="text" maxlength="30000" placeholder="ここに文字を入力してください。&#10;&#10;写真にそっと、ことばを重ねて。" spellcheck="false"></textarea>
    <p id="selection-info">選択なし · 設定は文字全体に反映します</p>
    <label class="field"><span class="label">フォント</span><select id="family"><option value="sans">角ゴシック</option><option value="serif">明朝</option><option value="round">丸ゴシック</option><option value="textbook">教科書風</option></select></label>
    <label class="label" for="size">文字サイズ</label><div class="size-buttons"><button id="smaller">小さく −</button><button id="larger">大きく ＋</button></div>
    <div class="row"><div class="number-unit"><input id="size" type="number" min="6" max="200" step="1" aria-label="文字サイズ"><span id="font-size-unit">pt</span></div><button id="bold" aria-pressed="false"><b>B</b> 太字</button><input class="color-input" id="color" type="color" aria-label="文字の色"></div>
+  </div>
+  <div class="section"><h2>文字の並べ方</h2>
+   <div class="segmented" role="group" aria-label="文字揃え"><button data-align="left" class="active">左揃え</button><button data-align="center">中央</button><button data-align="right">右揃え</button></div>
+   <label class="check"><input type="checkbox" id="vertical">縦書きにする</label>
+   <p class="hint" id="vertical-hint" hidden>右の列から左へ読み進めます。揃え方は上・中央・下に対応します。</p>
+   <label class="range-label" for="letter-spacing"><span>文字間隔</span><output id="letter-spacing-value">0%</output></label><input id="letter-spacing" type="range" min="-0.5" max="0.5" step="0.01" value="0">
+   <div class="row"><button id="tighten-spacing">間隔を狭く −</button><button id="reset-spacing">標準に戻す</button></div><p class="hint">マイナスにすると、文字と文字の間が詰まります。</p>
+   <label class="range-label" for="line-height"><span>行間</span><output id="line-height-value">1.65</output></label><input id="line-height" type="range" min="1" max="3" step="0.05" value="1.65">
   </div>
   <div class="section"><h2>文字枠の位置と大きさ</h2>
    <p class="hint" id="text-box-help">用紙上の緑の枠をドラッグして移動。四隅の丸をつかむと大きさを変えられます。</p>
    <div class="margin-grid" style="margin-top:14px">
     ${[['x','左から'],['y','上から'],['width','幅'],['height','高さ']].map(([key,label])=>`<label class="field"><span class="label">${label}</span><div class="number-unit"><input id="box-${key}" data-box="${key}" type="number" min="${key==='width'||key==='height'?20:0}" step="1"><span data-layout-unit>mm</span></div></label>`).join('')}
    </div><div class="row" style="margin-top:14px"><button id="compact-text-box">小さな枠にする</button><button id="center-text-box">用紙の中央へ</button></div>
-  </div>
-  <div class="section"><h2>文字の並べ方</h2>
-   <div class="segmented" role="group" aria-label="文字揃え"><button data-align="left" class="active">左揃え</button><button data-align="center">中央</button><button data-align="right">右揃え</button></div>
-   <label class="check"><input type="checkbox" id="vertical">縦書きにする</label>
-   <p class="hint" id="vertical-hint" hidden>右の列から左へ読み進めます。揃え方は上・中央・下に対応します。</p>
-   <label class="range-label" for="line-height"><span>行間</span><output id="line-height-value">1.65</output></label><input id="line-height" type="range" min="1" max="3" step="0.05" value="1.65">
   </div>
   <div class="section"><h2>文字に、やわらかな光を。</h2>
    <label class="check"><input id="glow" type="checkbox">glow（光彩）をつける</label>
@@ -86,7 +89,7 @@ document.querySelector('#app').innerHTML = `
 </aside>
 <main class="stage" aria-label="仕上がりプレビュー">
  <div class="stage-bar"><div><input id="title" class="document-name" maxlength="100" aria-label="原稿の名前"></div><div class="stage-meta"><span id="page-meta">A4 · 210 × 297 mm</span><div class="history"><button id="undo" aria-label="元に戻す" title="元に戻す">↶</button><button id="redo" aria-label="やり直す" title="やり直す">↷</button></div><button id="fullscreen" class="quiet" aria-label="画面いっぱいで編集" title="画面いっぱいで編集">⛶</button></div></div>
- <div class="canvas-scroll" id="canvas-scroll"><div class="paper-wrap" id="paper-wrap"><canvas id="canvas" aria-label="仕上がりのプレビュー"></canvas><div class="guides" id="guides"></div><div id="text-box" class="text-box" role="group" tabindex="0" aria-label="文字枠を移動" aria-describedby="text-box-help"><span class="text-box-caption" aria-hidden="true">文字枠 · ドラッグで移動</span>${[['nw','左上'],['ne','右上'],['sw','左下'],['se','右下']].map(([key,label])=>`<button type="button" class="box-handle ${key}" data-resize="${key}" aria-label="文字枠の${label}を調整" title="ドラッグで大きさを変更"></button>`).join('')}</div><div class="empty-note" id="empty-note"><b>余白から、はじめよう。</b><small>左の文字欄に、ことばを添えて。</small></div></div></div>
+ <div class="canvas-scroll" id="canvas-scroll"><div class="paper-wrap" id="paper-wrap"><canvas id="canvas" aria-label="仕上がりのプレビュー"></canvas><div class="guides" id="guides"></div><div id="text-box" class="text-box" role="group" tabindex="0" aria-label="文字枠を移動" aria-describedby="text-box-help"><span class="text-box-caption" aria-hidden="true">文字枠 · ドラッグで移動</span>${[['nw','左上'],['ne','右上'],['sw','左下'],['se','右下']].map(([key,label])=>`<button type="button" class="box-handle ${key}" data-resize="${key}" aria-label="文字枠の${label}を調整" title="ドラッグで大きさを変更"></button>`).join('')}</div><div id="text-box-other" class="text-box inactive-box" role="button" tabindex="0" aria-label="もう一つの文字ボックスを編集" hidden><span class="text-box-caption" aria-hidden="true"></span></div><div class="empty-note" id="empty-note"><b>余白から、はじめよう。</b><small>左の文字欄に、ことばを添えて。</small></div></div></div>
  <div class="stage-footer"><span id="save-status" role="status"><i class="dot"></i>このブラウザーに自動保存</span><span id="overflow" class="warning" role="status" hidden>文字が枠に収まりません。枠を広げるか文字を小さくしてください。</span><span id="char-count">0 文字</span></div>
 </main>
 </div>
@@ -97,8 +100,24 @@ document.querySelector('#app').innerHTML = `
 <div class="toast" id="toast" role="status" hidden></div>`;
 
 let state=initialState(), image=null, tab='text', selection=[0,0], history=[], future=[], saveTimer, toastTimer, composing=false, overflow=false;
+let activeTextBox=0;
 let fontReady=Promise.resolve(), fontKey='', drawing=0, hasBooted=false;
 const canvas=$('canvas'), text=$('text');
+function layer(){return activeTextBox===1 && state.secondTextBox ? state.secondTextBox : state;}
+function editState(t=layer()){return {...state,...t};}
+function chooseLayer(index){
+  if(index===1&&!state.secondTextBox)return;
+  activeTextBox=index;selection=[0,0];text.value=layer().text;text.setSelectionRange(0,0);syncControls();scheduleDraw();
+}
+$('select-box-1').onclick=()=>chooseLayer(0);$('select-box-2').onclick=()=>chooseLayer(1);
+$('add-text-box').onclick=()=>{
+  if(state.secondTextBox)return;
+  remember();const t=layer(),b=textBounds(editState()),[w,h]=dimensions(state);
+  const width=Math.min(b.width,w*2/3),height=Math.min(b.height,h/3),y=b.y+b.height+5;
+  state.secondTextBox={text:'',styles:[],style:{...t.style},vertical:t.vertical,align:t.align,lineHeight:t.lineHeight,letterSpacing:t.letterSpacing||0,textBox:{x:Math.max(0,Math.min(w-width,b.x)),y:y+height<=h?y:Math.max(0,Math.min(h-height,b.y+10)),width,height}};
+  chooseLayer(1);changed();text.focus();
+};
+
 function toast(message) { $('toast').textContent=message; $('toast').hidden=false; clearTimeout(toastTimer); toastTimer=setTimeout(()=>$('toast').hidden=true,5000); }
 function remember() { history.push(JSON.stringify(state)); if(history.length>40)history.shift(); future=[]; updateHistory(); }
 function updateHistory(){ $('undo').disabled=!history.length; $('redo').disabled=!future.length; }
@@ -114,37 +133,44 @@ function fitPaper() {
   const width=Math.max(50,Math.min(availableW,availableH*w/h,850));
   $('paper-wrap').style.width=`${width}px`; $('paper-wrap').style.height=`${width*h/w}px`;
   const m=state.margins; Object.assign($('guides').style,{top:`${m.top/h*100}%`,bottom:`${m.bottom/h*100}%`,left:`${m.left/w*100}%`,right:`${m.right/w*100}%`});
-  const b=textBounds(state); Object.assign($('text-box').style,{left:`${b.x/w*100}%`,top:`${b.y/h*100}%`,width:`${b.width/w*100}%`,height:`${b.height/h*100}%`});
+  function positionFrame(id,t){const b=textBounds(editState(t));Object.assign($(id).style,{left:`${b.x/w*100}%`,top:`${b.y/h*100}%`,width:`${b.width/w*100}%`,height:`${b.height/h*100}%`});}
+  positionFrame('text-box',layer());if(state.secondTextBox)positionFrame('text-box-other',activeTextBox===0?state.secondTextBox:state);
 }
 async function ensureFonts() {
-  const styles=[state.style,...state.styles.filter(Boolean)], unique=new Map();
-  for(const s of styles) unique.set(`${s.family}:${s.bold}`,s);
-  const key=[...unique.keys()].sort().join('|')+'|'+state.text;
-  if(key===fontKey) return fontReady;
-  fontKey=key;
-  // Explicitly load the font subsets used by Canvas; Canvas alone doesn't trigger CSS font loading.
-  fontReady=Promise.all([...unique.values()].map(s=>document.fonts.load(`${s.bold?(s.family==='textbook'?600:700):400} 24px ${families[s.family]}`, state.text || '写真にことばを。ABC')));
+  const layers=textLayers(state),styles=layers.flatMap(t=>[t.style,...t.styles.filter(Boolean)]),unique=new Map(),content=layers.map(t=>t.text).join('\n');
+  for(const s of styles)unique.set(`${s.family}:${s.bold}`,s);
+  const key=[...unique.keys()].sort().join('|')+'|'+content;
+  if(key===fontKey)return fontReady;fontKey=key;
+  fontReady=Promise.all([...unique.values()].map(s=>document.fonts.load(`${s.bold?(s.family==='textbook'?600:700):400} 24px ${families[s.family]}`,content || '写真にことばを。ABC')));
   return fontReady;
 }
 function scheduleDraw(){ cancelAnimationFrame(drawing); drawing=requestAnimationFrame(draw); }
 async function draw(){
   try { await ensureFonts(); } catch { toast('フォントを読み込めませんでした。通信を確認してください。'); }
   const result=render(canvas,state,image,{dpi:pageFormat(state).pixels?300:120}); overflow=result.overflow;
-  $('overflow').hidden=!overflow; $('empty-note').hidden=!!state.text || !!image;
-  $('char-count').textContent=`${[...state.text].length.toLocaleString()} 文字`;
+  $('overflow').hidden=!overflow;$('overflow').textContent=`${result.overflowingBoxes.map(n=>'BOX'+n).join('・')}の文字が枠に収まりません。枠を広げるか文字を小さくしてください。`;$('empty-note').hidden=textLayers(state).some(t=>!!t.text)||!!image;
+  $('char-count').textContent=`${textLayers(state).reduce((sum,t)=>sum+[...t.text].length,0).toLocaleString()} 文字`;
   fitPaper();
 }
-function activeStyle(){ return {...state.style,...(selection[0]!==selection[1]?state.styles[selection[0]]:null)}; }
+function activeStyle(){ return {...layer().style,...(selection[0]!==selection[1]?layer().styles[selection[0]]:null)}; }
 function selectionInfo(){ const [a,b]=selection; $('selection-info').textContent=a!==b?`${b-a} 文字を選択中 · 設定は選択範囲に反映します`:'選択なし · 設定は文字全体に反映します'; }
 function syncControls(){
+  if(activeTextBox===1&&!state.secondTextBox)activeTextBox=0;
+  $('select-box-2').hidden=!(state.secondTextBox);$('add-text-box').hidden=!!state.secondTextBox;
+  for(const i of [0,1]){$('select-box-'+(i+1)).classList.toggle('active',activeTextBox===i);$('select-box-'+(i+1)).setAttribute('aria-pressed',activeTextBox===i);}
+  $('text-label').textContent=`BOX${activeTextBox+1}の本文`;
+  $('letter-spacing').value=layer().letterSpacing||0;$('letter-spacing-value').value=`${Math.round((layer().letterSpacing||0)*100)}%`;
+  $('text-box').querySelector('.text-box-caption').textContent=`BOX${activeTextBox+1} · ドラッグで移動`;
+  $('text-box-other').querySelector('.text-box-caption').textContent=`BOX${activeTextBox===0?2:1} · 選択して編集`;
+  $('text-box-other').hidden=tab!=='text'||!state.secondTextBox;
   const s=activeStyle();
-  for(const [id,v] of Object.entries({family:s.family,size:s.size,color:s.color,'glow-color':s.glowColor,'glow-size':s.glowSize,fit:state.background.fit,opacity:state.background.opacity,zoom:state.background.zoom,'image-x':state.background.x,'image-y':state.background.y,'line-height':state.lineHeight,'paper-color':state.paper,title:state.title})) $(id).value=v;
+  for(const [id,v] of Object.entries({family:s.family,size:s.size,color:s.color,'glow-color':s.glowColor,'glow-size':s.glowSize,fit:state.background.fit,opacity:state.background.opacity,zoom:state.background.zoom,'image-x':state.background.x,'image-y':state.background.y,'line-height':layer().lineHeight,'paper-color':state.paper,title:state.title})) $(id).value=v;
   $('bold').setAttribute('aria-pressed',s.bold); $('bold').classList.toggle('active',s.bold); $('bold').style.background=s.bold?'#e4eddf':'';
-  $('glow').checked=s.glow; $('vertical').checked=state.vertical; $('vertical-hint').hidden=!state.vertical;
-  $('glow-size-value').value=s.glowSize; $('line-height-value').value=state.lineHeight;
+  $('glow').checked=s.glow; $('vertical').checked=layer().vertical; $('vertical-hint').hidden=!layer().vertical;
+  $('glow-size-value').value=s.glowSize; $('line-height-value').value=layer().lineHeight;
   $('opacity-value').value=`${state.background.opacity}%`; $('zoom-value').value=`${Math.round(state.background.zoom*100)}%`;
   for(const k in state.margins) $('margin-'+k).value=state.margins[k];
-  document.querySelectorAll('[data-align]').forEach((b,i)=>{b.classList.toggle('active',b.dataset.align===state.align); b.textContent=state.vertical?['上揃え','中央','下揃え'][i]:['左揃え','中央','右揃え'][i];});
+  document.querySelectorAll('[data-align]').forEach((b,i)=>{b.classList.toggle('active',b.dataset.align===layer().align); b.textContent=layer().vertical?['上揃え','中央','下揃え'][i]:['左揃え','中央','右揃え'][i];});
   document.querySelectorAll('[data-orientation]').forEach(b=>b.classList.toggle('active',b.dataset.orientation===state.orientation));
   const format=pageFormat(state), video=!!format.pixels, factor=layoutFactor();
   $('page-size').value=state.pageSize || 'a4';$('page-badge').textContent=video?'VIDEO':'A4';$('page-orientation').hidden=video;
@@ -163,7 +189,7 @@ function syncControls(){
   $('paper-wrap').classList.toggle('adjust',tab==='background');
   const fontFactor=fontSizeFactor();$('size').value=Math.round(s.size*fontFactor*10)/10;
   $('size').min=6*fontFactor;$('size').max=200*fontFactor;$('font-size-unit').textContent=video?'px':'pt';
-  const box=textBounds(state), [pageWidth,pageHeight]=dimensions(state);
+  const box=textBounds(editState()), [pageWidth,pageHeight]=dimensions(state);
   for(const [key,value] of Object.entries(box)) {
     const el=$('box-'+key); el.value=Math.round(value*factor*10)/10;el.min=key==='width'||key==='height'?Math.ceil(20*factor):0;
     el.max=Math.floor((key==='x'?pageWidth-box.width:key==='y'?pageHeight-box.height:key==='width'?pageWidth-box.x:pageHeight-box.y)*factor);
@@ -173,8 +199,8 @@ function syncControls(){
 }
 function applyStyle(patch) {
   remember(); const [a,b]=selection;
-  if(a!==b) {for(let i=a;i<b;i++) state.styles[i]={...state.style,...state.styles[i],...patch};}
-  else {state.style={...state.style,...patch};state.styles=state.styles.map(s=>s?{...s,...patch}:s);}
+  if(a!==b) {for(let i=a;i<b;i++) layer().styles[i]={...layer().style,...layer().styles[i],...patch};}
+  else {layer().style={...layer().style,...patch};layer().styles=layer().styles.map(s=>s?{...s,...patch}:s);}
   changed();
   // Keep the logical selection while controls own focus; never insert an accidental newline.
 }
@@ -186,12 +212,12 @@ text.addEventListener('compositionstart',()=>{remember();composing=true;});
 text.addEventListener('compositionend',()=>{composing=false;captureSelection();});
 text.addEventListener('beforeinput',()=>{if(!composing)remember();});
 text.addEventListener('input',()=>{
-  const old=state.text, next=text.value; let start=0;
+  const old=layer().text, next=text.value; let start=0;
   while(start<old.length && start<next.length && old[start]===next[start])start++;
   let tail=0; while(tail<old.length-start && tail<next.length-start && old[old.length-1-tail]===next[next.length-1-tail])tail++;
-  const inserted=next.length-start-tail, inherited={...state.style,...state.styles[Math.max(0,start-1)]};
-  state.styles=[...state.styles.slice(0,start),...Array.from({length:inserted},()=>({...inherited})),...state.styles.slice(old.length-tail)];
-  state.text=next;selection=[text.selectionStart,text.selectionEnd];changed({sync:false});selectionInfo();
+  const inserted=next.length-start-tail, inherited={...layer().style,...layer().styles[Math.max(0,start-1)]};
+  layer().styles=[...layer().styles.slice(0,start),...Array.from({length:inserted},()=>({...inherited})),...layer().styles.slice(old.length-tail)];
+  layer().text=next;selection=[text.selectionStart,text.selectionEnd];changed({sync:false});selectionInfo();
 });
 for(const [id,key] of [['family','family'],['color','color'],['glow-color','glowColor']]) $(id).addEventListener('change',e=>applyStyle({[key]:e.target.value}));
 $('size').addEventListener('change',e=>{const v=Number(e.target.value)/fontSizeFactor();if(!Number.isFinite(v)||v<6||v>200){syncControls();return;}applyStyle({size:v});});
@@ -199,7 +225,7 @@ $('size').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();
 for(const [id,delta] of [['smaller',-2],['larger',2]]) $(id).onclick=()=>{
   const [a,b]=selection;
   if(a===b) applyStyle({size:Math.max(6,Math.min(200,activeStyle().size+delta/fontSizeFactor()))});
-  else {remember(); for(let i=a;i<b;i++){const s={...state.style,...state.styles[i]};state.styles[i]={...s,size:Math.max(6,Math.min(200,s.size+delta/fontSizeFactor()))};}changed();}
+  else {remember(); for(let i=a;i<b;i++){const s={...layer().style,...layer().styles[i]};layer().styles[i]={...s,size:Math.max(6,Math.min(200,s.size+delta/fontSizeFactor()))};}changed();}
 };
 $('bold').onclick=()=>applyStyle({bold:!activeStyle().bold});
 $('glow').onchange=e=>applyStyle({glow:e.target.checked});
@@ -207,18 +233,20 @@ $('glow-size').addEventListener('pointerdown',()=>remember());
 $('glow-size').addEventListener('keydown',e=>{if(['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Home','End'].includes(e.key))remember();});
 $('glow-size').oninput=e=>{ // Range edits are grouped into a single undo entry for pointer interaction.
   const patch={glowSize:Number(e.target.value)}, [a,b]=selection;
-  if(a!==b)for(let i=a;i<b;i++)state.styles[i]={...state.style,...state.styles[i],...patch};
-  else{state.style={...state.style,...patch};state.styles=state.styles.map(s=>s?{...s,...patch}:s);}changed();
+  if(a!==b)for(let i=a;i<b;i++)layer().styles[i]={...layer().style,...layer().styles[i],...patch};
+  else{layer().style={...layer().style,...patch};layer().styles=layer().styles.map(s=>s?{...s,...patch}:s);}changed();
 };
 function updateValue(fn){remember();fn();changed();}
-$('vertical').onchange=e=>updateValue(()=>state.vertical=e.target.checked);
+$('vertical').onchange=e=>updateValue(()=>layer().vertical=e.target.checked);
+$('tighten-spacing').onclick=()=>updateValue(()=>layer().letterSpacing=Math.max(-.5,Math.round(((layer().letterSpacing||0)-.05)*100)/100));
+$('reset-spacing').onclick=()=>updateValue(()=>layer().letterSpacing=0);
 $('paper-color').onchange=e=>updateValue(()=>state.paper=e.target.value);
 $('title').onchange=e=>updateValue(()=>state.title=e.target.value.trim()||'無題のかさね');
 $('show-guides').onchange=e=>$('guides').hidden=!e.target.checked;
-for(const id of ['line-height','opacity','zoom','image-x','image-y']) {
+for(const id of ['line-height','letter-spacing','opacity','zoom','image-x','image-y']) {
   $(id).addEventListener('pointerdown',()=>remember());
   $(id).addEventListener('keydown',e=>{if(['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Home','End'].includes(e.key))remember();});
-  $(id).oninput=e=>{const n=Number(e.target.value);if(id==='line-height')state.lineHeight=n;else state.background[{'image-x':'x','image-y':'y'}[id]||id]=n;changed();};
+  $(id).oninput=e=>{const n=Number(e.target.value);if(id==='line-height')layer().lineHeight=n;else if(id==='letter-spacing')layer().letterSpacing=n;else state.background[{'image-x':'x','image-y':'y'}[id]||id]=n;changed();};
 }
 $('fit').onchange=e=>updateValue(()=>{Object.assign(state.background,{fit:e.target.value,x:0,y:0,zoom:1});});
 $('reset-image').onclick=()=>updateValue(()=>Object.assign(state.background,{x:0,y:0,zoom:1}));
@@ -231,22 +259,22 @@ function fitMargins(){
     if(total>available){state.margins[first]*=available/total;state.margins[second]*=available/total;}
   }
 }
-document.querySelectorAll('[data-margin]').forEach(el=>el.onchange=()=>updateValue(()=>{state.margins[el.dataset.margin]=Math.max(0,Math.min(Number(el.max)/layoutFactor(),Number(el.value)/layoutFactor()||0));state.textBox=null;}));
+document.querySelectorAll('[data-margin]').forEach(el=>el.onchange=()=>updateValue(()=>{for(const t of textLayers(state))if(t!==layer()&&!t.textBox)t.textBox=textBounds(editState(t));state.margins[el.dataset.margin]=Math.max(0,Math.min(Number(el.max)/layoutFactor(),Number(el.value)/layoutFactor()||0));layer().textBox=null;}));
 $('page-size').onchange=e=>updateValue(()=>{
-  const [oldW,oldH]=dimensions(state),box=textBounds(state);state.pageSize=e.target.value;
+  const [oldW,oldH]=dimensions(state),layers=textLayers(state),boxes=layers.map(t=>textBounds(editState(t)));state.pageSize=e.target.value;
   const [w,h]=dimensions(state),rx=w/oldW,ry=h/oldH;
-  state.textBox=textBounds({...state,textBox:{x:box.x*rx,y:box.y*ry,width:box.width*rx,height:box.height*ry}});
+  layers.forEach((t,i)=>{const b=boxes[i];t.textBox=textBounds({...state,textBox:{x:b.x*rx,y:b.y*ry,width:b.width*rx,height:b.height*ry}});});
   for(const key in state.margins)state.margins[key]=Math.min(70,state.margins[key]*(key==='left'||key==='right'?rx:ry));
   fitMargins();state.background.x=Math.max(-300,Math.min(300,state.background.x*rx));state.background.y=Math.max(-300,Math.min(300,state.background.y*ry));
 });
-document.querySelectorAll('[data-align]').forEach(b=>b.onclick=()=>updateValue(()=>state.align=b.dataset.align));
-document.querySelectorAll('[data-orientation]').forEach(b=>b.onclick=()=>updateValue(()=>{state.orientation=b.dataset.orientation;state.textBox=textBounds(state);}));
+document.querySelectorAll('[data-align]').forEach(b=>b.onclick=()=>updateValue(()=>layer().align=b.dataset.align));
+document.querySelectorAll('[data-orientation]').forEach(b=>b.onclick=()=>updateValue(()=>{state.orientation=b.dataset.orientation;for(const t of textLayers(state))t.textBox=textBounds(editState(t));}));
 document.querySelectorAll('[data-box]').forEach(el=>el.onchange=()=>{
   const value=Number(el.value)/layoutFactor();if(el.value===''||!Number.isFinite(value)){syncControls();return;}
-  updateValue(()=>{const box=textBounds(state);box[el.dataset.box]=value;state.textBox=textBounds({...state,textBox:box});});
+  updateValue(()=>{const box=textBounds(editState());box[el.dataset.box]=value;layer().textBox=textBounds({...editState(),textBox:box});});
 });
-$('compact-text-box').onclick=()=>updateValue(()=>{const box=textBounds(state),[w,h]=dimensions(state),video=!!pageFormat(state).pixels;state.textBox=textBounds({...state,textBox:{...box,width:video?w*2/3:140,height:video?h/3:100}});});
-$('center-text-box').onclick=()=>updateValue(()=>{const [w,h]=dimensions(state),box=textBounds(state);state.textBox={...box,x:(w-box.width)/2,y:(h-box.height)/2};});
+$('compact-text-box').onclick=()=>updateValue(()=>{const box=textBounds(editState()),[w,h]=dimensions(state),video=!!pageFormat(state).pixels;layer().textBox=textBounds({...editState(),textBox:{...box,width:video?w*2/3:140,height:video?h/3:100}});});
+$('center-text-box').onclick=()=>updateValue(()=>{const [w,h]=dimensions(state),box=textBounds(editState());layer().textBox={...box,x:(w-box.width)/2,y:(h-box.height)/2};});
 function setTab(name){tab=name;document.querySelectorAll('[data-tab]').forEach(b=>{const active=b.dataset.tab===name;b.setAttribute('aria-selected',active);b.tabIndex=active?0:-1;$('panel-'+b.dataset.tab).hidden=!active;});syncControls();}
 document.querySelectorAll('[data-tab]').forEach(b=>{b.onclick=()=>setTab(b.dataset.tab);b.onkeydown=e=>{if(['ArrowLeft','ArrowRight','Home','End'].includes(e.key)){e.preventDefault();const tabs=['text','background','page'];let i=tabs.indexOf(tab);i=e.key==='Home'?0:e.key==='End'?2:(i+(e.key==='ArrowLeft'?-1:1)+3)%3;setTab(tabs[i]);$('tab-'+tabs[i]).focus();}};});
 function readDataURL(file){return new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.onerror=()=>reject(new Error('ファイルを読み込めませんでした。'));reader.readAsDataURL(file);});}
@@ -268,7 +296,7 @@ $('image-file').onchange=async e=>{
   }catch(error){toast(error.message);}finally{$('choose-image').disabled=false;}
 };
 $('remove-image').onclick=()=>updateValue(()=>{image=null;state.background.src='';});
-async function restore(next){state=next;selection=[0,0];text.value=state.text;image=state.background.src?await decodeImage(state.background.src):null;changed();}
+async function restore(next){state=next;if(!state.secondTextBox)activeTextBox=0;selection=[0,0];text.value=layer().text;image=state.background.src?await decodeImage(state.background.src):null;changed();}
 async function undo(){if(!history.length)return;future.push(JSON.stringify(state));await restore(JSON.parse(history.pop()));}
 async function redo(){if(!future.length)return;history.push(JSON.stringify(state));await restore(JSON.parse(future.pop()));}
 $('undo').onclick=undo;$('redo').onclick=redo;
@@ -290,8 +318,8 @@ $('save-project').onclick=saveProject;
 $('open-project').onclick=()=>$('project-file').click();
 $('project-file').onchange=async e=>{
   const file=e.target.files[0];e.target.value='';if(!file)return;
-  if(file.size>30000000){toast('原稿ファイルが大きすぎます。');return;}
-  try{const next=validateProject(JSON.parse(await file.text()));const nextImage=next.background.src?await decodeImage(next.background.src):null;remember();state=next;image=nextImage;text.value=state.text;selection=[0,0];changed();toast('原稿を開きました。');}catch{toast('原稿を開けませんでした。「かさね」で保存した原稿ファイルを選んでください。');}
+  if(file.size>50000000){toast('原稿ファイルが大きすぎます。');return;}
+  try{const next=validateProject(JSON.parse(await file.text()));const nextImage=next.background.src?await decodeImage(next.background.src):null;remember();state=next;activeTextBox=0;image=nextImage;text.value=layer().text;selection=[0,0];changed();toast('原稿を開きました。');}catch{toast('原稿を開けませんでした。「かさね」で保存した原稿ファイルを選んでください。');}
 };
 $('new-document').onclick=()=>$('new-dialog').showModal();$('cancel-new').onclick=()=>$('new-dialog').close();
 $('confirm-new').onclick=()=>{remember();restore(initialState());$('new-dialog').close();};
@@ -318,12 +346,15 @@ $('confirm-export').onclick=async()=>{
 };
 // The overlay is editor-only; the shared canvas renderer uses the same millimetre bounds.
 const textBoxElement=$('text-box'); let boxGesture=null;
-textBoxElement.addEventListener('pointerdown',e=>{
+function startBoxGesture(e){
   if(tab!=='text'||boxGesture||e.button!==0)return;
   e.preventDefault();const handle=e.target.closest('[data-resize]');
   (handle||textBoxElement).focus({preventScroll:true});textBoxElement.setPointerCapture(e.pointerId);
-  boxGesture={id:e.pointerId,startX:e.clientX,startY:e.clientY,box:textBounds(state),corner:handle?.dataset.resize,mm:dimensions(state)[0]/canvas.getBoundingClientRect().width,moved:false};
-});
+  boxGesture={id:e.pointerId,startX:e.clientX,startY:e.clientY,box:textBounds(editState()),corner:handle?.dataset.resize,mm:dimensions(state)[0]/canvas.getBoundingClientRect().width,moved:false};
+}
+textBoxElement.addEventListener('pointerdown',startBoxGesture);
+$('text-box-other').addEventListener('pointerdown',e=>{if(e.button!==0||boxGesture)return;chooseLayer(activeTextBox===0?1:0);startBoxGesture(e);});
+$('text-box-other').addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();chooseLayer(activeTextBox===0?1:0);textBoxElement.focus();}});
 textBoxElement.addEventListener('pointermove',e=>{
   const g=boxGesture;if(!g||g.id!==e.pointerId)return;e.preventDefault();
   const dx=(e.clientX-g.startX)*g.mm,dy=(e.clientY-g.startY)*g.mm;
@@ -337,12 +368,12 @@ textBoxElement.addEventListener('pointermove',e=>{
     if(g.corner.includes('n'))top=clamp(b.y+dy,0,bottom-20);
     if(g.corner.includes('s'))bottom=clamp(b.y+b.height+dy,top+20,h);
   }
-  state.textBox={x:left,y:top,width:right-left,height:bottom-top};changed();
+  layer().textBox={x:left,y:top,width:right-left,height:bottom-top};changed();
 });
 for(const name of ['pointerup','pointercancel','lostpointercapture'])textBoxElement.addEventListener(name,e=>{if(boxGesture?.id===e.pointerId)boxGesture=null;});
 textBoxElement.addEventListener('keydown',e=>{
   if(!['ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(e.key))return;
-  e.preventDefault();const delta=(e.shiftKey?5:1)/layoutFactor(),box=textBounds(state),corner=e.target.closest('[data-resize]')?.dataset.resize;
+  e.preventDefault();const delta=(e.shiftKey?5:1)/layoutFactor(),box=textBounds(editState()),corner=e.target.closest('[data-resize]')?.dataset.resize;
   const dx=e.key==='ArrowLeft'?-delta:e.key==='ArrowRight'?delta:0,dy=e.key==='ArrowUp'?-delta:e.key==='ArrowDown'?delta:0;
   updateValue(()=>{
     if(!corner){box.x+=dx;box.y+=dy;}
@@ -352,7 +383,7 @@ textBoxElement.addEventListener('keydown',e=>{
       if(corner.includes('n')){const shift=Math.max(-box.y,Math.min(box.height-20,dy));box.y+=shift;box.height-=shift;}
       else box.height+=dy;
     }
-    state.textBox=textBounds({...state,textBox:box});
+    layer().textBox=textBounds({...editState(),textBox:box});
   });
 });
 // Gesture coordinates use physical page units, so sliders and touch gestures share the same state.
@@ -378,7 +409,7 @@ for(const event of ['pointerup','pointercancel','lostpointercapture'])canvas.add
 new ResizeObserver(()=>fitPaper()).observe($('canvas-scroll'));
 window.addEventListener('pagehide',()=>{if(hasBooted)saveDraft(state).catch(()=>{});});
 async function boot(){
-  try{const saved=await loadDraft();if(saved){state=validateProject(saved);image=state.background.src?await decodeImage(state.background.src):null;text.value=state.text;}}catch{toast('前回の原稿を復元できませんでした。保存した原稿ファイルから開けます。');}
+  try{const saved=await loadDraft();if(saved){state=validateProject(saved);image=state.background.src?await decodeImage(state.background.src):null;text.value=layer().text;}}catch{toast('前回の原稿を復元できませんでした。保存した原稿ファイルから開けます。');}
   hasBooted=true;syncControls();await draw();document.documentElement.dataset.ready='true';
 }
 boot();

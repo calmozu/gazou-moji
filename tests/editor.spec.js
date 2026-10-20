@@ -199,3 +199,48 @@ test('old portrait mini drafts migrate to landscape without losing text or reset
   await expect(page.locator('#save-status')).toContainText('保存済み');await page.reload();await expect(page.locator('html')).toHaveAttribute('data-ready','true');expect((await project(page)).textBox).toEqual(migrated.textBox);
   await page.locator('#project-file').setInputFiles({name:'landscape-mini.kasane',mimeType:'application/json',buffer:Buffer.from(JSON.stringify(migrated))});expect((await project(page)).textBox).toEqual(migrated.textBox);
 });
+
+test('negative character spacing narrows horizontal and vertical text and preserves alignment',async({page})=>{
+  await ready(page);
+  const r=await page.evaluate(async()=>{
+    const {initialState,render}=await import('/src/render.js');await document.fonts.load('400 24px "Noto Sans JP"','あいうえおか');
+    const s=initialState();s.text='あいうえおか';s.textBox={x:30,y:40,width:100,height:100};const c=document.createElement('canvas');
+    function capture(){const layout=render(c,s,null);const {width:w,height:h}=c,d=c.getContext('2d').getImageData(0,0,w,h).data;let left=w,top=h,right=0,bottom=0;for(let y=0;y<h;y++)for(let x=0;x<w;x++){if(d[(y*w+x)*4]<180){left=Math.min(left,x);top=Math.min(top,y);right=Math.max(right,x);bottom=Math.max(bottom,y);}}return {left,top,right,bottom,width:right-left,height:bottom-top,layout};}
+    const normal=capture();s.letterSpacing=-.3;const tight=capture();s.letterSpacing=0;s.align='center';const centered=capture();s.letterSpacing=-.3;const centeredTight=capture();s.align='right';s.letterSpacing=0;const right=capture();s.letterSpacing=-.3;const rightTight=capture();
+    s.align='left';s.vertical=true;s.letterSpacing=0;const vertical=capture();s.letterSpacing=-.3;const verticalTight=capture();s.vertical=false;s.textBox.width=40;s.letterSpacing=0;const wrapped=capture();s.letterSpacing=-.3;const fitted=capture();
+    return {normal,tight,centered,centeredTight,right,rightTight,vertical,verticalTight,wrapped,fitted};
+  });
+  expect(r.tight.width).toBeLessThan(r.normal.width*.85);expect(r.verticalTight.height).toBeLessThan(r.vertical.height*.85);
+  expect(Math.abs((r.centered.left+r.centered.right)-(r.centeredTight.left+r.centeredTight.right))).toBeLessThan(3);expect(Math.abs(r.right.right-r.rightTight.right)).toBeLessThan(2);expect(r.wrapped.layout.lines).toBeGreaterThan(r.fitted.layout.lines);
+});
+
+test('two boxes have independent text, styles, spacing and movement, with undo and persistence',async({page})=>{
+  await ready(page);await page.locator('#text').fill('BOX1の見出し');await page.locator('#tighten-spacing').click();await page.locator('#tighten-spacing').click();
+  await page.locator('#add-text-box').click();await expect(page.locator('#select-box-2')).toHaveAttribute('aria-pressed','true');await expect(page.locator('#text')).toHaveValue('');await page.locator('#text').fill('BOX2の本文');
+  await page.locator('#family').selectOption('serif');await page.locator('#color').evaluate(el=>{el.value='#0044cc';el.dispatchEvent(new Event('change',{bubbles:true}));});await page.locator('#vertical').check();await page.locator('#tighten-spacing').click();
+  await page.locator('#text').evaluate(el=>{el.focus();el.setSelectionRange(0,2);el.dispatchEvent(new Event('select'));});await page.locator('#bold').click();
+  const before=await project(page);expect(before.text).toBe('BOX1の見出し');expect(before.secondTextBox.text).toBe('BOX2の本文');expect(before.letterSpacing).toBe(-.1);expect(before.secondTextBox.letterSpacing).toBe(-.15);expect(before.style.family).toBe('sans');expect(before.secondTextBox.style.family).toBe('serif');expect(before.vertical).toBe(false);expect(before.secondTextBox.vertical).toBe(true);expect(before.secondTextBox.styles[0].bold).toBe(true);expect(before.styles[0].bold).toBe(false);
+  await drag(page,'#text-box',25,25);const moved=await project(page);expect(moved.textBox).toEqual(before.textBox);expect(moved.secondTextBox.textBox.x).toBeGreaterThan(before.secondTextBox.textBox.x);
+  await page.locator('#undo').click();expect((await project(page)).secondTextBox.textBox).toEqual(before.secondTextBox.textBox);await page.locator('#redo').click();expect((await project(page)).secondTextBox.textBox).toEqual(moved.secondTextBox.textBox);
+  // Clicking and dragging an inactive frame selects that box in the same gesture.
+  await drag(page,'#text-box-other',20,10);await expect(page.locator('#select-box-1')).toHaveAttribute('aria-pressed','true');const bothMoved=await project(page);expect(bothMoved.textBox.x).toBeGreaterThan(moved.textBox.x);expect(bothMoved.secondTextBox.textBox).toEqual(moved.secondTextBox.textBox);await expect(page.locator('#text')).toHaveValue('BOX1の見出し');await expect(page.locator('#letter-spacing')).toHaveValue('-0.1');
+  await expect(page.locator('#save-status')).toContainText('保存済み');await page.reload();await expect(page.locator('html')).toHaveAttribute('data-ready','true');expect(await project(page)).toEqual(bothMoved);await page.locator('#select-box-2').click();await expect(page.locator('#text')).toHaveValue('BOX2の本文');await expect(page.locator('#letter-spacing')).toHaveValue('-0.15');
+  await page.locator('#project-file').setInputFiles({name:'two-boxes.kasane',mimeType:'application/json',buffer:Buffer.from(JSON.stringify(bothMoved))});expect(await project(page)).toEqual(bothMoved);
+  await page.locator('#tab-page').click();await page.locator('#page-size').selectOption('short-mini');const mini=await project(page);for(const t of [mini,mini.secondTextBox]){expect(t.textBox.x+t.textBox.width).toBeLessThanOrEqual(1920*25.4/300+.001);expect(t.textBox.y+t.textBox.height).toBeLessThanOrEqual(1080*25.4/300+.001);}expect(mini.secondTextBox.text).toBe('BOX2の本文');
+});
+
+test('real PNG and PDF contain both independently styled and spaced boxes',async({page},info)=>{
+  await ready(page);await page.locator('#text').fill('赤のBOX');await changeBox(page,{width:80,height:50,x:20,y:25});await page.locator('#color').evaluate(el=>{el.value='#cc0000';el.dispatchEvent(new Event('change',{bubbles:true}));});await page.locator('#tighten-spacing').click();
+  await page.locator('#add-text-box').click();await page.locator('#text').fill('青のBOX');await changeBox(page,{width:80,height:50,x:100,y:150});await page.locator('#color').evaluate(el=>{el.value='#0044cc';el.dispatchEvent(new Event('change',{bubbles:true}));});await page.locator('#family').selectOption('serif');
+  await page.locator('#export-button').click();let event=page.waitForEvent('download');await page.locator('#confirm-export').click();let file=await event;await file.saveAs(info.outputPath('two-boxes.png'));
+  const data=(await fs.readFile(await file.path())).toString('base64');const counts=await page.evaluate(async base64=>{const im=await createImageBitmap(await(await fetch('data:image/png;base64,'+base64)).blob()),c=document.createElement('canvas');c.width=im.width;c.height=im.height;const ctx=c.getContext('2d');ctx.drawImage(im,0,0);const d=ctx.getImageData(0,0,c.width,c.height).data;let red=0,blue=0,redMinY=c.height,blueMinY=c.height;for(let y=0;y<c.height;y++)for(let x=0;x<c.width;x++){const i=(y*c.width+x)*4;if(d[i]>d[i+1]+60&&d[i]>d[i+2]+60){red++;redMinY=Math.min(redMinY,y);}if(d[i+2]>d[i]+60&&d[i+2]>d[i+1]+60){blue++;blueMinY=Math.min(blueMinY,y);}}return {red,blue,redMinY,blueMinY};},data);
+  expect(counts.red).toBeGreaterThan(100);expect(counts.blue).toBeGreaterThan(100);expect(counts.redMinY*25.4/300).toBeGreaterThanOrEqual(25);expect(counts.blueMinY*25.4/300).toBeGreaterThanOrEqual(150);
+  await page.locator('#export-format').selectOption('pdf');event=page.waitForEvent('download');await page.locator('#confirm-export').click();file=await event;await file.saveAs(info.outputPath('two-boxes.pdf'));expect((await fs.readFile(await file.path())).toString('latin1')).toContain('/Subtype /Image');
+});
+
+test('legacy one-box files retain standard spacing and invalid second boxes preserve current work',async({page})=>{
+  await ready(page);const old=await project(page);delete old.letterSpacing;delete old.secondTextBox;old.text='以前の原稿';old.styles=[];
+  await page.locator('#project-file').setInputFiles({name:'old.kasane',mimeType:'application/json',buffer:Buffer.from(JSON.stringify(old))});await expect(page.locator('#text')).toHaveValue('以前の原稿');await expect(page.locator('#letter-spacing')).toHaveValue('0');await expect(page.locator('#add-text-box')).toBeVisible();
+  await page.locator('#add-text-box').click();await page.locator('#text').fill('二つ目');const saved=await project(page);saved.secondTextBox.letterSpacing=-2;
+  await page.locator('#project-file').setInputFiles({name:'bad.kasane',mimeType:'application/json',buffer:Buffer.from(JSON.stringify(saved))});await expect(page.locator('#toast')).toContainText('原稿を開けません');await expect(page.locator('#text')).toHaveValue('二つ目');
+});
