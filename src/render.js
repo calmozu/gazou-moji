@@ -15,8 +15,15 @@ export const families = {
   heavy: '"Dela Gothic One", sans-serif',
   decorative: '"Kaisei Decol", serif',
   reggae: '"Reggae One", sans-serif',
+  caption: '"Mochiy Pop One", sans-serif',
+  explanation: '"BIZ UDPGothic", sans-serif',
+  sourceSerif: '"Source Han Serif JP", serif',
+  brushStrong: '"Yuji Boku", serif',
+  looseHand: '"Zen Kurenaido", sans-serif',
+  eerie: '"New Tegomin", serif',
 };
-export const familyLabels={sans:'角ゴシック',serif:'明朝',round:'丸ゴシック',textbook:'教科書風',handwriting:'手書き（よもぎ）',brush:'筆文字（佑字）',pop:'ポップ（はちまる）',heavy:'極太ゴシック',decorative:'飾り明朝',reggae:'個性派（レゲエ）'};
+export const familyLabels={sans:'角ゴシック',serif:'明朝',round:'丸ゴシック',textbook:'教科書風',handwriting:'手書き（よもぎ）',brush:'筆文字（佑字）',pop:'ポップ（はちまる）',heavy:'零ゴシック (仮)',decorative:'飾り明朝',reggae:'レゲエOne',caption:'ルイカ (仮)',explanation:'わんぱくレラ (仮)',sourceSerif:'源ノ明朝',brushStrong:'風雅筆 (仮)',looseHand:'あずき (仮)',eerie:'ミステリStd (仮)'};
+export const substituteFonts={caption:'Mochiy Pop One',explanation:'BIZ UDPGothic',heavy:'Dela Gothic One',brushStrong:'Yuji Boku',looseHand:'Zen Kurenaido',eerie:'New Tegomin'};
 export const baseStyle = { ...backlightDefaults, ...effectDefaults, family: 'sans', size: 24, bold: false, color: '#252923', fillPreset:'solid', gradientDirection:'auto', glow: false, glowColor: '#ffffff', glowSize: 1.5 };
 export const pageFormats={
   a4: {label:'A4'},

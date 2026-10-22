@@ -1,3 +1,10 @@
+import '@fontsource/mochiy-pop-one/400.css';
+import '@fontsource/biz-udpgothic/400.css';
+import '@fontsource/biz-udpgothic/700.css';
+import '@fontsource/yuji-boku/400.css';
+import '@fontsource/zen-kurenaido/400.css';
+import '@fontsource/new-tegomin/400.css';
+import './caption-fonts.css';
 import { backlightDefaults, backlightPanel, backlightPresets, backlightInputs } from './backlight.js';
 import { paperPanel, paperFillDefaults, paintPaper } from './paper-fill.js';
 import { effectDefaults, textEffectPresets, effectPanel, effectInputs } from './text-effects.js';
@@ -19,7 +26,7 @@ import '@fontsource/zen-maru-gothic/700.css';
 import '@fontsource/klee-one/400.css';
 import '@fontsource/klee-one/600.css';
 import './style.css';
-import { families, familyLabels, imageBounds, initialState, render, dimensions, textBounds, validateProject, pageFormats, pageFormat, pageScale, textLayers } from './render.js';
+import { families, familyLabels, substituteFonts, imageBounds, initialState, render, dimensions, textBounds, validateProject, pageFormats, pageFormat, pageScale, textLayers } from './render.js';
 import { saveDraft, loadDraft } from './storage.js';
 import { pngWithDpi } from './png.js';
 
@@ -48,7 +55,7 @@ document.querySelector('#app').innerHTML = `
    <button id="delete-text-box" class="quiet box-delete" hidden>BOX2を削除</button>
    <label for="text" class="label" id="text-label">BOX1の本文</label><textarea id="text" maxlength="30000" placeholder="ここに文字を入力してください。&#10;&#10;写真にそっと、ことばを重ねて。" spellcheck="false"></textarea>
    <p id="selection-info">選択なし · 設定は文字全体に反映します</p>
-   <label class="field"><span class="label">フォント</span><select id="family">${Object.entries(familyLabels).map(([key,label])=>`<option value="${key}">${label}</option>`).join('')}</select></label>
+   <label class="field"><span class="label">フォント</span><select id="family">${Object.entries(familyLabels).map(([key,label])=>`<option value="${key}">${label}</option>`).join('')}</select><span id="font-family-note" class="font-family-note hint" aria-live="polite"></span></label>
    <label class="label" for="size">文字サイズ</label><div class="size-buttons"><button id="smaller">小さく −</button><button id="larger">大きく ＋</button></div>
    <div class="row"><div class="number-unit"><input id="size" type="number" min="6" max="200" step="1" aria-label="文字サイズ"><span id="font-size-unit">pt</span></div><button id="bold" aria-pressed="false"><b>B</b> 太字</button><input class="color-input" id="color" type="color" aria-label="文字の色"></div>
    <label class="field preset-field"><span class="label">文字色のプリセット</span><select id="fill-preset"><option value="solid">単色（色を選ぶ）</option>${Object.entries(colorPresets).map(([key,preset])=>`<option value="${key}">${preset.label}</option>`).join('')}</select></label>
@@ -206,6 +213,7 @@ function syncControls(){
   $('text-box-other').querySelector('.text-box-caption').textContent=`BOX${activeTextBox===0?2:1} · 選択して編集`;
   $('text-box-other').hidden=tab!=='text'||!state.secondTextBox;
   const s=activeStyle();
+  $('font-family-note').textContent=substituteFonts[s.family]?`代替書体：${substituteFonts[s.family]}。指定書体そのものではありません。`:`実際の書体：${families[s.family].split(',')[0].slice(1,-1)}`;
   for(const [id,v] of Object.entries({family:s.family,size:s.size,color:s.color,'glow-color':s.glowColor,'glow-size':s.glowSize,fit:state.background.fit,opacity:state.background.opacity,zoom:state.background.zoom,'image-x':state.background.x,'image-y':state.background.y,'line-height':layer().lineHeight,'paper-color':state.paper,title:state.title})) $(id).value=v;
   for(const [id,key] of Object.entries({...effectInputs,...backlightInputs})){const el=$(id);if(el.type==='checkbox')el.checked=s[key];else el.value=s[key];if($(id+'-value'))$(id+'-value').value=key==='backlightStrength'?`${s[key]}%`:key==='backlightSpread'?`${Math.round(s[key]*100)}%`:`${s[key]} mm`;}
   const fill={...paperFillDefaults,...state.paperFill};

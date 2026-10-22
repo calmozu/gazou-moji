@@ -292,7 +292,7 @@ async function overlayUpload(page,color='#e02030',name='透過ロゴ.png'){
 async function overlayValue(page,key,value){await page.locator('#overlay-'+key).fill(String(value));await page.locator('#overlay-'+key).press('Tab');}
 
 test('six additional Japanese fonts load, render distinctly and survive selected-text editing and reload',async({page})=>{
-  await ready(page);await page.locator('#text').fill('春の便り、また会いましょう。');expect(await page.locator('#family option').count()).toBe(10);
+  await ready(page);await page.locator('#text').fill('春の便り、また会いましょう。');expect(await page.locator('#family option').count()).toBe(16);
   const hashes=[];
   for(const family of ['handwriting','brush','pop','heavy','decorative','reggae']){
     await page.locator('#family').selectOption(family);
